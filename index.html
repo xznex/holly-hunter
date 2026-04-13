@@ -1020,6 +1020,8 @@ class Game {
     ];
     this.btnSkipShop = { x: GW/2-140, y: 630, w: 280, h: 54 };
     this.btnMute     = { x: GW - 76,  y: 12,  w: 56,  h: 56  };
+    this.btnPause    = { x: GW - 76,  y: 12,  w: 56,  h: 56  };
+    this.isMobile    = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
 
     const SW = 560, SH = 40;
     this.sliders = {
@@ -1114,7 +1116,15 @@ class Game {
   _click(x, y) {
     const hit = (b) => x >= b.x && x <= b.x+b.w && y >= b.y && y <= b.y+b.h;
 
-    if (hit(this.btnMute)) { this.snd.toggleMute(); return; }
+    if (this.isMobile) {
+      if (hit(this.btnPause)) {
+        if (this.state === 'playing') this._setState('paused');
+        else if (this.state === 'paused') this._resume();
+        return;
+      }
+    } else {
+      if (hit(this.btnMute)) { this.snd.toggleMute(); return; }
+    }
 
     if (this.state === 'menu') {
       if (hit(this.btnStart)) this._startGame();
@@ -1581,17 +1591,32 @@ class Game {
     else if (this.state === 'gameover')      this._drawGameOver(ctx);
     else if (this.state === 'win')           this._drawWin(ctx);
 
-    // Кнопка звука — поверх всего, во всех состояниях
-    const mb = this.btnMute;
-    ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.beginPath(); ctx.roundRect(mb.x, mb.y, mb.w, mb.h, 10); ctx.fill();
-    ctx.font = '32px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(this.snd.muted ? '🔇' : '🔊', mb.x + mb.w / 2, mb.y + mb.h / 2);
-    ctx.textBaseline = 'alphabetic';
-    ctx.restore();
+    // Кнопка в правом верхнем углу: на мобиле — пауза, на десктопе — звук
+    if (this.isMobile) {
+      if (this.state === 'playing' || this.state === 'paused') {
+        const pb = this.btnPause;
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.beginPath(); ctx.roundRect(pb.x, pb.y, pb.w, pb.h, 10); ctx.fill();
+        ctx.font = '28px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(this.state === 'paused' ? '▶' : '⏸', pb.x + pb.w / 2, pb.y + pb.h / 2);
+        ctx.textBaseline = 'alphabetic';
+        ctx.restore();
+      }
+    } else {
+      const mb = this.btnMute;
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.beginPath(); ctx.roundRect(mb.x, mb.y, mb.w, mb.h, 10); ctx.fill();
+      ctx.font = '32px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(this.snd.muted ? '🔇' : '🔊', mb.x + mb.w / 2, mb.y + mb.h / 2);
+      ctx.textBaseline = 'alphabetic';
+      ctx.restore();
+    }
 
     ctx.restore();
   }
