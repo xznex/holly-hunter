@@ -1,0 +1,2087 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Holy Hunter — Для Алины ❤️</title>
+<link rel="icon" type="image/jpeg" href="images/icon-cross.jpg">
+<style>
+@font-face {
+  font-family: 'Unutterable';
+  src: url('fonts/unutterable.ttf') format('truetype');
+  font-display: block;
+}
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html, body {
+  width:100%; height:100%;
+  background:#000;
+  overflow:hidden;
+  user-select:none;
+  -webkit-user-select:none;
+}
+#gameCanvas {
+  position:absolute;
+  top:50%; left:50%;
+  transform:translate(-50%,-50%);
+  cursor:default;
+  display:block;
+}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="1920" height="1080"></canvas>
+<script>
+'use strict';
+
+/* ═══════════════════════════════════════════════════════════════════════
+   HOLY HUNTER: ДЛЯ АЛИНЫ ❤️
+   Одностраничный Canvas-шутер с монстрами, монетами и любовью
+   ═══════════════════════════════════════════════════════════════════════ */
+
+// ── Размер игрового поля (не меняй, это внутренние координаты) ──────────
+const GW = 1920;
+const GH = 1080;
+
+// ── Количество уровней и время ──────────────────────────────────────────
+const TOTAL_LEVELS  = 5;
+const LEVEL_MS      = 30000; // 30 секунд на уровень
+const LVL_PAUSE_MS  = 3000;  // Пауза между уровнями
+const COMBO_KILLS   = 5;     // Убийств подряд для x2 монет
+const COMBO_DUR_MS  = 10000; // Длительность x2 монет (мс)
+
+const VOICE = {
+  kill:  ['voice_kill_0','voice_kill_1','voice_kill_2'],
+  combo: ['voice_combo_0','voice_combo_1','voice_combo_2'],
+  big:   ['voice_big_0','voice_big_1','voice_big_2'],
+  dmg:   ['voice_dmg_0','voice_dmg_1','voice_dmg_2','voice_dmg_3'],
+  lowhp: ['voice_lowhp_0','voice_lowhp_1'],
+  lvl:   ['voice_lvl_0','voice_lvl_1'],
+  shop:  ['voice_shop_0','voice_shop_1'],
+  win:   ['voice_win_0','voice_win_1'],
+};
+const VOICE_COOLDOWN_MS = 2500;
+
+/* ── Конфиг уровней ─────────────────────────────────────────────────────
+   Чтобы изменить сложность — меняй значения в этом массиве:
+     spawnMs   = интервал спавна монстра (мс). Меньше → чаще.
+     maxOnMap  = максимум монстров на экране одновременно.
+     speedMult = скорость анимации монстров (1.0 = базовая).
+   ──────────────────────────────────────────────────────────────────────── */
+const LEVEL_CFG = [
+  { spawnMs: 1800, maxOnMap: 4, speedMult: 1.0  }, // Уровень 1
+  { spawnMs: 1500, maxOnMap: 5, speedMult: 1.25 }, // Уровень 2
+  { spawnMs: 1200, maxOnMap: 6, speedMult: 1.5  }, // Уровень 3
+  { spawnMs:  950, maxOnMap: 6, speedMult: 1.75 }, // Уровень 4
+  { spawnMs:  950, maxOnMap: 7, speedMult: 1.9  }, // Уровень 5 — финал
+];
+
+/* ── PNG-спрайты для tentacle и bigMonster ──────────────────────────────
+   Спавнятся по очереди: при каждом новом монстре берётся следующий файл.
+   ──────────────────────────────────────────────────────────────────────── */
+const SPRITE_FILES = {
+  tentacle:   ['images/tentacle_1.png',    'images/tentacle_2.png'],
+  bigMonster: ['images/big_monster_1.png', 'images/big_monster_2.png'],
+};
+
+/* ── Локации спавна ─────────────────────────────────────────────────────
+   Чтобы добавить вторую локацию:
+     1. Скопируй блок haunted_building ниже.
+     2. Дай новому ключу имя (например 'dark_forest').
+     3. Укажи свой bg, windowSpots, groundSpots, bigSpot.
+     4. В Game._spawnMonster() выбирай локацию по уровню или рандомно.
+   ──────────────────────────────────────────────────────────────────────── */
+const LOCATIONS = {
+  haunted_building: {
+    bg: 'images/background_clean.jpg',
+    // WindowFace выглядывает из этих точек (окна здания)
+    // sw/sh — размер вырезаемого спрайта из background.jpg (центрируется вокруг x,y)
+    windowSpots: [
+      {x:719, y:390, sw:90, sh:86},  {x:850, y:418, sw:90, sh:86}, {x:966, y:442, sw:90, sh:86}, {x:1071, y:466, sw:90, sh:86}, 
+      {x:228, y:301, sw:85, sh:80}, {x:726, y:232, sw:90, sh:86}, {x:853, y:271, sw:90, sh:86}, {x:1067, y:332, sw:90, sh:86},
+      {x:855, y:136, sw:90, sh:86}, {x:961, y:174, sw:90, sh:86},
+      {x:850, y:580, sw:90, sh:86}, {x:1078, y:613, sw:90, sh:86},
+      // {x:295, y:525, sw:130, sh:180}, // {x:480, y:525, sw:130, sh:180}, {x:668, y:525, sw:130, sh:180}, {x:856, y:525, sw:130, sh:180}, {x:1044, y:525, sw:130, sh:180},
+    ],
+    // Tentacle вырастает снизу из этих точек
+    // sw/sh — ширина и высота выреза (sh пикселей ВВЕРХ от y)
+    groundSpots: [
+      {x:276, y:1011, sw:250, sh:280}, {x:643, y:1011, sw:250, sh:280}, {x:1216, y:1011, sw:250, sh:280},
+      {x:450, y:1047, sw:250, sh:280}, {x:1300, y:1078, sw:250, sh:280}
+    ],
+    // BigMonster входит справа и останавливается здесь
+    bigSpot: {x:1652, y:800, sw:430, sh:543},
+    // Передний план: часть background_clean.jpg, рисуется ПОВЕРХ bigMonster для эффекта глубины
+    // Подстрой sx/sw/sh под позицию правой колонны здания
+    foregroundClip: {sx:1380, sy:350, sw:540, sh:730, dx:1380, dy:350},
+  },
+  // dark_forest: { bg: 'forest.jpg', windowSpots: [...], groundSpots: [...], bigSpot: {...} },
+};
+
+// ── Вспомогательные функции ─────────────────────────────────────────────
+const clamp  = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp   = (a, b, t) => a + (b - a) * t;
+const rnd    = (a, b)    => Math.random() * (b - a) + a;
+const rndInt = (a, b)    => Math.floor(rnd(a, b + 1));
+
+// Полифилл для ctx.roundRect (Safari / старые Chrome)
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+    r = Math.min(typeof r === 'number' ? r : (r?.[0] ?? 0), w / 2, h / 2);
+    this.moveTo(x + r, y);
+    this.arcTo(x + w, y,     x + w, y + h, r);
+    this.arcTo(x + w, y + h, x,     y + h, r);
+    this.arcTo(x,     y + h, x,     y,     r);
+    this.arcTo(x,     y,     x + w, y,     r);
+    this.closePath();
+    return this;
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   КЛАСС: SoundManager — управление звуком
+   ═══════════════════════════════════════════════════════════════════════
+   Файлы звуков кладутся в папку sounds/ рядом с index.html:
+     sounds/shot.mp3           — звук выстрела
+     sounds/monster_death.mp3  — смерть монстра
+     sounds/coin.mp3           — монетка
+     sounds/horror_ambient.mp3 — фоновая атмосфера (тихая, зациклена)
+     sounds/rock_n_roll.mp3    — победный трек на экране победы
+   Если файлов нет — игра работает без звука, ошибок не будет.
+   ═══════════════════════════════════════════════════════════════════════ */
+class SoundManager {
+  constructor() {
+    this._sounds = {};
+    this.muted = false;
+    this.gameMult  = 1.0;
+    this.voiceMult = 1.0;
+    this._make('shot',     'sounds/shot.mp3',           0.18, false);
+    this._make('death',    'sounds/monster_death.mp3',  0.28, false);
+    this._make('coin',     'sounds/coin.mp3',           0.22, false);
+    this._make('ambient',  'sounds/horror_ambient.mp3', 0.06, true);
+    this._make('rock',     'sounds/rock_n_roll.mp3',    0.43, true);
+    this._make('thunder1', 'sounds/thunder_1.mp3', 0.30, false);
+    this._make('thunder2', 'sounds/thunder_2.mp3', 0.30, false);
+    this._make('whisper',          'sounds/demon_whisper.mp3',    0.13, false);
+    this._make('heartbreak',      'sounds/heart.mp3',            0.35, false);
+    this._make('gameover',        'sounds/game_over.mp3',        0.40, false);
+    this._make('bigLaugh',        'sounds/big_monster_laugh.mp3',0.35, false);
+    this._make('bigDeath1',       'sounds/big_monster_death_1.mp3', 0.13, false);
+    this._make('bigDeath2',       'sounds/big_monster_death_2.mp3', 0.13, false);
+    this._make('tentacleDamage',  'sounds/tentacle_damage.mp3',     0.35, false);
+    this._make('tentacleDeath1',  'sounds/tentacle_death_1.mp3',    0.13, false);
+    this._make('tentacleDeath2',  'sounds/tentacle_death_2.mp3',    0.13, false);
+    this._make('tentacleDeath3',  'sounds/tentacle_death_3.mp3',    0.13, false);
+    this._make('tentacleDeath4',  'sounds/tentacle_death_4.mp3',    0.13, false);
+    this._make('tentacleDeath5',  'sounds/tentacle_death_5.mp3',    0.13, false);
+    this._make('tentacleDeath6',  'sounds/tentacle_death_6.mp3',    0.13, false);
+    // Голос персонажа
+    this._make('voice_kill_0',  'sounds/voice/kill_0.mp3',   0.75, false, true);
+    this._make('voice_kill_1',  'sounds/voice/kill_1.mp3',   0.75, false, true);
+    this._make('voice_kill_2',  'sounds/voice/kill_2.mp3',   0.75, false, true);
+    this._make('voice_combo_0', 'sounds/voice/combo_0.mp3',  0.75, false, true);
+    this._make('voice_combo_1', 'sounds/voice/combo_1.mp3',  0.75, false, true);
+    this._make('voice_combo_2', 'sounds/voice/combo_2.mp3',  0.75, false, true);
+    this._make('voice_big_0',   'sounds/voice/big_0.mp3',    0.8,  false, true);
+    this._make('voice_big_1',   'sounds/voice/big_1.mp3',    0.8,  false, true);
+    this._make('voice_big_2',   'sounds/voice/big_2.mp3',    0.8,  false, true);
+    this._make('voice_dmg_0',   'sounds/voice/dmg_0.mp3',    0.75, false, true);
+    this._make('voice_dmg_1',   'sounds/voice/dmg_1.mp3',    0.75, false, true);
+    this._make('voice_dmg_2',   'sounds/voice/dmg_2.mp3',    0.75, false, true);
+    this._make('voice_dmg_3',   'sounds/voice/dmg_3.mp3',    0.75, false, true);
+    this._make('voice_lowhp_0', 'sounds/voice/lowhp_0.mp3',  0.8,  false, true);
+    this._make('voice_lowhp_1', 'sounds/voice/lowhp_1.mp3',  0.8,  false, true);
+    this._make('voice_lvl_0',   'sounds/voice/lvl_0.mp3',    0.75, false, true);
+    this._make('voice_lvl_1',   'sounds/voice/lvl_1.mp3',    0.75, false, true);
+    this._make('voice_shop_0',  'sounds/voice/shop_0.mp3',   0.75, false, true);
+    this._make('voice_shop_1',  'sounds/voice/shop_1.mp3',   0.75, false, true);
+    this._make('voice_win_0',   'sounds/voice/win_0.mp3',    0.8,  false, true);
+    this._make('voice_win_1',   'sounds/voice/win_1.mp3',    0.8,  false, true);
+  }
+
+  setVol(name, vol) {
+    const s = this._sounds[name];
+    if (!s) return;
+    s.vol = vol;
+    try { s.audio.volume = vol; } catch(_) {}
+  }
+
+  _make(name, src, vol, loop, isVoice = false) {
+    const a = new Audio();
+    a.src = src;
+    a.volume = vol;
+    a.loop = loop;
+    a.preload = 'auto';
+    a.onerror = () => {}; // Тихо игнорируем отсутствующий файл
+    this._sounds[name] = { audio: a, vol, base: vol, isVoice };
+  }
+
+  setGameMult(m) {
+    this.gameMult = m;
+    Object.values(this._sounds).forEach(s => {
+      if (!s.isVoice) try { s.audio.volume = s.base * m; } catch(_) {}
+    });
+  }
+
+  setVoiceMult(m) {
+    this.voiceMult = m;
+    Object.values(this._sounds).forEach(s => {
+      if (s.isVoice) try { s.audio.volume = s.base * m; } catch(_) {}
+    });
+  }
+
+  toggleMute() {
+    this.muted = !this.muted;
+    if (this.muted) this.stopAll();
+  }
+
+  // Одиночный звук (полифония — создаём клон, трекаем для stopAll)
+  play(name) {
+    if (this.muted) return;
+    const s = this._sounds[name];
+    if (!s) return;
+    try {
+      const clone = s.audio.cloneNode();
+      clone.volume = s.base * (s.isVoice ? this.voiceMult : this.gameMult);
+      if (!s.clones) s.clones = [];
+      s.clones.push(clone);
+      clone.addEventListener('ended', () => { s.clones = s.clones.filter(c => c !== clone); });
+      clone.play().catch(() => {});
+    } catch(_) {}
+  }
+
+  // Зациклённый звук
+  loop(name) {
+    if (this.muted) return;
+    const s = this._sounds[name];
+    if (!s) return;
+    try { s.audio.currentTime = 0; s.audio.play().catch(() => {}); } catch(_) {}
+  }
+
+  stop(name) {
+    const s = this._sounds[name];
+    if (!s) return;
+    try { s.audio.pause(); s.audio.currentTime = 0; } catch(_) {}
+  }
+
+  stopAll() {
+    Object.values(this._sounds).forEach(s => {
+      try { s.audio.pause(); s.audio.currentTime = 0; } catch(_) {}
+      if (s.clones) { s.clones.forEach(c => { try { c.pause(); } catch(_) {} }); s.clones = []; }
+    });
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   КЛАСС: Particle — частица (кровь, слизь, вспышка, конфетти, искра)
+   ═══════════════════════════════════════════════════════════════════════ */
+class Particle {
+  constructor(x, y, type) {
+    this.x    = x;
+    this.y    = y;
+    this.type = type;
+    this.life = 1.0;
+    this.alive = true;
+
+    if (type === 'blood') {
+      this.vx    = rnd(-8, 8);
+      this.vy    = rnd(-11, -1);
+      this.r     = rnd(2, 8);
+      this.grav  = 0.38;
+      this.decay = rnd(0.022, 0.05);
+      this.hue   = rndInt(0, 20);
+    } else if (type === 'slime') {
+      this.vx    = rnd(-9, 9);
+      this.vy    = rnd(-9, 0);
+      this.r     = rnd(3, 10);
+      this.grav  = 0.30;
+      this.decay = rnd(0.018, 0.042);
+      this.hue   = rndInt(80, 140);
+    } else if (type === 'muzzle') {
+      const a = rnd(-0.7, 0.7);
+      const sp = rnd(4, 14);
+      this.vx    = Math.cos(a) * sp;
+      this.vy    = Math.sin(a) * sp - 4;
+      this.r     = rnd(2, 7);
+      this.grav  = 0.18;
+      this.decay = rnd(0.08, 0.20);
+    } else if (type === 'confetti') {
+      this.vx    = rnd(-5, 5);
+      this.vy    = rnd(2, 6);
+      this.w     = rnd(6, 15);
+      this.h     = rnd(3, 7);
+      this.ang   = rnd(0, Math.PI * 2);
+      this.angV  = rnd(-0.18, 0.18);
+      this.grav  = 0.07;
+      this.decay = rnd(0.0025, 0.006);
+      this.hue   = rndInt(0, 360);
+    } else if (type === 'spark') {
+      this.vx    = rnd(-7, 7);
+      this.vy    = rnd(-12, -3);
+      this.r     = rnd(2, 5);
+      this.grav  = 0.42;
+      this.decay = rnd(0.04, 0.09);
+    }
+  }
+
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    if (this.grav) this.vy += this.grav;
+    this.vx *= 0.97;
+    this.life -= this.decay;
+    if (this.type === 'confetti') this.ang += this.angV;
+    if (this.life <= 0) this.alive = false;
+  }
+
+  draw(ctx) {
+    if (!this.alive || this.life <= 0) return;
+    const a = Math.max(0, this.life);
+    ctx.save();
+    ctx.globalAlpha = a;
+
+    if (this.type === 'blood' || this.type === 'slime') {
+      ctx.fillStyle = `hsl(${this.hue}, 85%, 32%)`;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, Math.max(0.5, this.r * this.life), 0, Math.PI * 2);
+      ctx.fill();
+    } else if (this.type === 'muzzle') {
+      ctx.fillStyle = `rgba(255, ${(180 + this.life * 75) | 0}, 40, ${a})`;
+      ctx.shadowColor = '#ffaa00';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, Math.max(0.5, this.r), 0, Math.PI * 2);
+      ctx.fill();
+    } else if (this.type === 'confetti') {
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.ang);
+      ctx.fillStyle = `hsl(${this.hue}, 100%, 60%)`;
+      ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
+    } else if (this.type === 'spark') {
+      ctx.fillStyle = '#FFD700';
+      ctx.shadowColor = '#FFD700';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, Math.max(0.5, this.r * this.life), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   КЛАСС: Monster — монстр (три подтипа: windowFace, tentacle, bigMonster)
+   ═══════════════════════════════════════════════════════════════════════
+   Добавить новый тип монстра:
+     1. Добавь новую ветку в _applyTypeCfg() с hp, coins, size и т.д.
+     2. Добавь позиции спавна в LOCATIONS.
+     3. Добавь метод _drawМойМонстр() по аналогии с остальными.
+     4. Вызови его в draw().
+   ═══════════════════════════════════════════════════════════════════════ */
+class Monster {
+  constructor(type, pos, levelCfg, spriteImg = null) {
+    this.type      = type;
+    this.spot      = pos;       // полный объект с x, y, sw, sh
+    this.spriteImg = spriteImg; // PNG для tentacle/bigMonster; null = вырезка из background.jpg
+    this.baseX = pos.x;
+    this.baseY = pos.y;
+    this.x     = pos.x;
+    this.y     = pos.y;
+    this.spd   = levelCfg.speedMult;
+
+    // Фазы жизни: appearing → active → retreating → (gone=true)
+    this.phase       = 'appearing';
+    this.phaseT      = 0;   // прогресс 0..1 текущей фазы
+    this.activeTimer = 0;
+
+    this.hitFlash = 0;
+    this.dead     = false;
+    this.gone     = false;
+
+    this.sinPhase = rnd(0, Math.PI * 2); // Уникальный сдвиг синусоиды
+
+    this._applyTypeCfg();
+
+    // Длительности фаз (мс). Скорость появления/отступления масштабируется
+    this.appearDur  = this.baseAppearDur  / this.spd;
+    this.retreatDur = this.baseRetreatDur / this.spd;
+    this.activeDur  = this.baseActiveDur;
+  }
+
+  _applyTypeCfg() {
+    if (this.type === 'windowFace') {
+      this.hp              = 1;
+      this.maxHp           = 1;
+      this.coins           = 10;
+      this.size            = 74;
+      this.baseAppearDur   = 680;
+      this.baseActiveDur   = 3200;
+      this.baseRetreatDur  = 520;
+    } else if (this.type === 'tentacle') {
+      this.hp              = 2;
+      this.maxHp           = 2;
+      this.coins           = 18;
+      this.size            = 105;
+      this.baseAppearDur   = 900;
+      this.baseActiveDur   = 4500;
+      this.baseRetreatDur  = 720;
+      this.sinAmp          = 38;  // Амплитуда качания (px)
+      this.sinSpd          = 2.8; // Скорость качания
+    } else if (this.type === 'bigMonster') {
+      this.hp              = 3;
+      this.maxHp           = 3;
+      this.coins           = 45; // В 2 раза больше обычного
+      this.size            = 185;
+      this.baseAppearDur   = 1400;
+      this.baseActiveDur   = 5000;
+      this.baseRetreatDur  = 1100;
+      this.entryX          = GW + 260; // Начальная позиция за экраном
+      this.targetX         = this.baseX;
+      this.x               = this.entryX;
+    }
+  }
+
+  // Нанести урон. Возвращает true если монстр убит.
+  hit() {
+    this.hp = Math.max(0, this.hp - 1);
+    this.hitFlash = 1.0;
+    if (this.hp <= 0) { this.dead = true; return true; }
+    return false;
+  }
+
+  update(dt, time) {
+    if (this.gone) return;
+    this.hitFlash = Math.max(0, this.hitFlash - dt * 0.007);
+
+    if (this.phase === 'appearing') {
+      this.phaseT = clamp(this.phaseT + dt / this.appearDur, 0, 1);
+      this._calcPos(time);
+      if (this.phaseT >= 1) { this.phase = 'active'; this.phaseT = 1; this.activeTimer = this.activeDur; }
+
+    } else if (this.phase === 'active') {
+      this._calcPos(time);
+      this.activeTimer -= dt;
+      if (this.dead || this.activeTimer <= 0) {
+        this.phase = 'retreating';
+        this.phaseT = 0;
+      }
+
+    } else if (this.phase === 'retreating') {
+      this.phaseT = clamp(this.phaseT + dt / this.retreatDur, 0, 1);
+      this._calcPos(time);
+      if (this.phaseT >= 1) this.gone = true;
+    }
+  }
+
+  // Пересчёт позиции в зависимости от фазы
+  _calcPos(time) {
+    // visible = насколько монстр "выдвинут" (0 = скрыт, 1 = полностью виден)
+    const vis = this.phase === 'retreating' ? 1 - this.phaseT : this.phaseT;
+
+    if (this.type === 'windowFace') {
+      this.x = this.baseX;
+      this.y = this.baseY - this.size * 0.48 * vis;
+
+    } else if (this.type === 'tentacle') {
+      const sine = Math.sin(time * 0.001 * this.sinSpd + this.sinPhase) * this.sinAmp * vis;
+      this.x = this.baseX + sine;
+      this.y = this.baseY - this.size * 0.65 * vis;
+
+    } else if (this.type === 'bigMonster') {
+      this.x = lerp(this.entryX, this.targetX, vis);
+      this.y = this.baseY;
+    }
+  }
+
+  // Центр хитбокса — считается по реальному положению спрайта, не по _calcPos
+  hitCenter() {
+    const vis = this.phase === 'retreating' ? 1 - this.phaseT : this.phaseT;
+    const spot = this.spot;
+    if (this.type === 'windowFace') {
+      // Фиксированный центр окна (fade-in анимация, не слайд)
+      return { x: spot.x, y: spot.y };
+    } else if (this.type === 'tentacle') {
+      // Центр спрайта — фиксированный (fade-in, нет вертикального слайда)
+      return { x: this.x, y: spot.y - spot.sh * 0.5 };
+    } else { // bigMonster — хитбокс по центру спрайта, радиус покрывает всё тело
+      return { x: this.x, y: spot.y };
+    }
+  }
+
+  hitRadius() {
+    const vis = this.phase === 'retreating' ? 1 - this.phaseT : this.phaseT;
+    const spot = this.spot;
+    // bigMonster: радиус = полудиагональ спрайта, чтобы покрывать всё тело
+    if (this.type === 'bigMonster') {
+      return Math.sqrt((spot.sw / 2) ** 2 + (spot.sh / 2) ** 2) * 0.90 * vis;
+    }
+    return Math.min(spot.sw, spot.sh) * 0.40 * vis;
+  }
+
+  // Вычислить позицию назначения спрайта на canvas (левый верхний угол)
+  _getSpritePos(vis, time) {
+    const spot = this.spot;
+    if (this.type === 'windowFace') {
+      // Фиксированная позиция в окне — появляется через fade + лёгкий дрейф вниз при исчезновении
+      return {
+        destX: spot.x - spot.sw / 2,
+        destY: spot.y - spot.sh / 2 + 8 * (1 - vis),
+      };
+    } else if (this.type === 'tentacle') {
+      // Фиксированная позиция + sin-покачивание по X; появление через fade-in
+      const sine = Math.sin(time * 0.001 * this.sinSpd + this.sinPhase) * this.sinAmp * vis;
+      return {
+        destX: spot.x - spot.sw / 2 + sine,
+        destY: spot.y - spot.sh,
+      };
+    } else {
+      // bigMonster: горизонтальный слайд, this.x уже lerp-анимирован в _calcPos
+      return {
+        destX: this.x - spot.sw / 2,
+        destY: spot.y - spot.sh / 2,
+      };
+    }
+  }
+
+  draw(ctx, time, monstersImg) {
+    if (this.gone) return;
+    const vis = this.phase === 'retreating' ? 1 - this.phaseT : this.phaseT;
+    if (vis < 0.02) return;
+
+    const usePng = this.spriteImg !== null;
+    // windowFace требует monstersImg (вырезка из background.jpg), остальные — PNG
+    if (!usePng && !monstersImg) return;
+
+    const spot = this.spot;
+    const { destX, destY } = this._getSpritePos(vis, time);
+
+    // Clip-регион (фиксированный, не анимируется)
+    ctx.save();
+    if (this.type === 'windowFace') {
+      ctx.beginPath();
+      ctx.rect(spot.x - spot.sw / 2, spot.y - spot.sh / 2, spot.sw, spot.sh);
+      ctx.clip();
+      ctx.globalAlpha = vis; // Плавное появление прямо в окне (fade-in)
+    } else if (this.type === 'tentacle') {
+      ctx.beginPath();
+      ctx.rect(spot.x - spot.sw / 2, spot.y - spot.sh, spot.sw, spot.sh);
+      ctx.clip();
+      ctx.globalAlpha = vis; // Fade-in как у windowFace
+    }
+    // bigMonster — без clip
+
+    if (usePng) {
+      // PNG-спрайт: масштабировать весь файл на spot.sw × spot.sh
+      // Ждём полной загрузки (naturalWidth > 0), чтобы drawImage не упал на частично загруженном файле
+      if (this.spriteImg.complete && this.spriteImg.naturalWidth > 0) {
+        ctx.drawImage(this.spriteImg, 0, 0, this.spriteImg.naturalWidth, this.spriteImg.naturalHeight,
+                      destX, destY, spot.sw, spot.sh);
+      }
+    } else {
+      // Вырезка из background.jpg (только windowFace)
+      const srcX = spot.x - spot.sw / 2;
+      const srcY = spot.y - spot.sh / 2;
+      ctx.drawImage(monstersImg, srcX, srcY, spot.sw, spot.sh, destX, destY, spot.sw, spot.sh);
+    }
+    ctx.restore();
+
+    // Hit flash — белый overlay поверх спрайта
+    if (this.hitFlash > 0) {
+      ctx.save();
+      ctx.globalAlpha = this.hitFlash * 0.65;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(destX, destY, spot.sw, spot.sh);
+      ctx.restore();
+    }
+
+    if (this.type === 'bigMonster' && this.maxHp > 1 && vis > 0.2) this._drawHpBar(ctx, vis);
+  }
+
+  _drawHpBar(ctx, vis) {
+    const hc = this.hitCenter();
+    const bw = this.spot.sw * 0.55; // фиксированная ширина, не растёт с vis
+    const bh = 6;
+    const bx = hc.x - bw / 2;
+    const by = this.spot.y - this.spot.sh / 2 - 10; // над спрайтом
+    const ratio = this.hp / this.maxHp;
+    const col = ratio > 0.6 ? '#44ff44' : ratio > 0.3 ? '#ffee00' : '#ff4444';
+
+    ctx.save();
+    ctx.globalAlpha = 0.55 * vis;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 3); ctx.fill();
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.roundRect(bx, by, bw * ratio, bh, 3); ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   КЛАСС: Weapon — Holy Pistol (следует за курсором, отдача, вспышка)
+   ═══════════════════════════════════════════════════════════════════════
+   Добавить новое оружие:
+     1. Скопируй этот класс, переименуй (например class Shotgun).
+     2. В draw() нарисуй новый внешний вид.
+     3. Измени cooldownMs и recoilAmount под новое оружие.
+     4. В Game создай поле currentWeapon и переключай по кнопке.
+   ═══════════════════════════════════════════════════════════════════════ */
+class Weapon {
+  constructor() {
+    this.x = GW / 2;
+    this.y = GH / 2;
+
+    // Физика отдачи (пружинная модель)
+    this.recoil    = 0;   // Текущее смещение
+    this.recoilVel = 0;   // Скорость
+
+    this.muzzleFlash = 0; // Интенсивность вспышки 0..1
+    this.cooldown    = 0; // Оставшийся кулдаун (мс)
+    this.cooldownMs  = 155; // Минимальный интервал между выстрелами
+  }
+
+  update(mx, my, dt) {
+    this.x = mx;
+    this.y = my;
+    // Пружинная отдача
+    this.recoilVel -= this.recoil * 0.38;
+    this.recoilVel *= 0.70;
+    this.recoil    += this.recoilVel;
+    this.recoil     = Math.max(0, this.recoil);
+
+    this.muzzleFlash = Math.max(0, this.muzzleFlash - dt * 0.012);
+    this.cooldown    = Math.max(0, this.cooldown - dt);
+  }
+
+  tryShoot() {
+    if (this.cooldown > 0) return false;
+    this.recoil    = 30;
+    this.recoilVel = -9;
+    this.muzzleFlash = 1.0;
+    this.cooldown  = this.cooldownMs;
+    return true;
+  }
+
+  draw(ctx) {
+    // Корпус пистолета: смещён от прицела вниз-вправо + отдача
+    const offX = 58;
+    const offY = 42 + this.recoil * 0.38;
+    const gx   = this.x + offX;
+    const gy   = this.y + offY;
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.55)';
+    ctx.shadowBlur  = 14;
+
+    // Рукоять
+    ctx.fillStyle = '#150c04';
+    ctx.beginPath(); ctx.roundRect(gx+10, gy+4, 28, 50, 6); ctx.fill();
+    ctx.fillStyle = '#241508';
+    for (let i = 0; i < 5; i++) ctx.fillRect(gx+14, gy+8+i*9, 18, 4);
+
+    // Основной корпус
+    ctx.fillStyle = '#111120';
+    ctx.beginPath(); ctx.roundRect(gx-20, gy-18, 82, 30, 8); ctx.fill();
+
+    // Затвор
+    ctx.fillStyle = '#1c1c2e';
+    ctx.beginPath(); ctx.roundRect(gx-14, gy-21, 58, 14, 4); ctx.fill();
+
+    // Гравировка
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#c8a020';
+    ctx.font = 'bold 10px monospace';
+    ctx.fillText('✝ HOLY', gx - 8, gy - 9);
+
+    // Ствол
+    ctx.fillStyle = '#0a0a14';
+    ctx.beginPath(); ctx.roundRect(gx+60, gy-13, 58, 12, 3); ctx.fill();
+
+    // Дульный тормоз
+    ctx.fillStyle = '#18182a';
+    ctx.beginPath(); ctx.roundRect(gx+114, gy-15, 13, 16, 2); ctx.fill();
+
+    // Muzzle Flash
+    if (this.muzzleFlash > 0.01) {
+      const fx = gx + 127, fy = gy - 7, fs = this.muzzleFlash;
+      ctx.shadowColor = '#ffcc00'; ctx.shadowBlur = 40 * fs;
+
+      const gr = ctx.createRadialGradient(fx, fy, 0, fx, fy, 55 * fs);
+      gr.addColorStop(0,   `rgba(255,255,200,${fs})`);
+      gr.addColorStop(0.3, `rgba(255,200,50,${fs * 0.85})`);
+      gr.addColorStop(0.7, `rgba(255,80,0,${fs * 0.4})`);
+      gr.addColorStop(1,   'rgba(255,50,0,0)');
+      ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.arc(fx, fy, 55 * fs, 0, Math.PI * 2); ctx.fill();
+
+      ctx.strokeStyle = `rgba(255,230,80,${fs * 0.55})`;
+      ctx.lineWidth = 1.5; ctx.shadowBlur = 0;
+      for (let i = 0; i < 8; i++) {
+        const ang = (i / 8) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(fx, fy);
+        ctx.lineTo(fx + Math.cos(ang) * 32 * fs, fy + Math.sin(ang) * 32 * fs);
+        ctx.stroke();
+      }
+    }
+
+    ctx.restore();
+    this._drawCrosshair(ctx);
+  }
+
+  _drawCrosshair(ctx) {
+    const x = this.x, y = this.y, r = 22, gap = 7;
+    ctx.save();
+    ctx.strokeStyle = '#00ff88';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = '#00ff88'; ctx.shadowBlur = 7;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x-r, y); ctx.lineTo(x-gap, y);
+    ctx.moveTo(x+gap, y); ctx.lineTo(x+r, y);
+    ctx.moveTo(x, y-r); ctx.lineTo(x, y-gap);
+    ctx.moveTo(x, y+gap); ctx.lineTo(x, y+r);
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, gap+3, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = '#00ff88'; ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   КЛАСС: LevelManager — уровни, таймер, спавн
+   ═══════════════════════════════════════════════════════════════════════ */
+class LevelManager {
+  constructor() {
+    this.level      = 1;
+    this.timeLeft   = LEVEL_MS;
+    this.spawnTimer = 1200;
+    this.active     = false;
+  }
+
+  get cfg()     { return LEVEL_CFG[this.level - 1]; }
+  get secLeft() { return Math.ceil(this.timeLeft / 1000); }
+
+  start(lvl) {
+    this.level      = lvl;
+    this.timeLeft   = LEVEL_MS;
+    this.spawnTimer = 1200;
+    this.active     = true;
+  }
+
+  // Возвращает 'spawn', 'end' или null
+  update(dt, aliveCount) {
+    if (!this.active) return null;
+
+    this.timeLeft   -= dt;
+    this.spawnTimer -= dt;
+
+    if (this.spawnTimer <= 0 && aliveCount < this.cfg.maxOnMap) {
+      this.spawnTimer = this.cfg.spawnMs + rnd(-350, 350);
+      return 'spawn';
+    }
+
+    if (this.timeLeft <= 0) {
+      this.timeLeft = 0;
+      this.active   = false;
+      return 'end';
+    }
+
+    return null;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   КЛАСС: UI — HUD, плавающие тексты, combo
+   ═══════════════════════════════════════════════════════════════════════ */
+class UI {
+  constructor() {
+    this.floats = []; // Плавающие тексты монет/комбо
+  }
+
+  addFloat(x, y, text, color = '#FFD700', size = 28) {
+    this.floats.push({ x, y, text, color, size, vy: -1.9, life: 1.0, decay: 0.013 });
+  }
+
+  update(dt) {
+    this.floats = this.floats.filter(f => {
+      f.y += f.vy; f.vy *= 0.97; f.life -= f.decay;
+      return f.life > 0;
+    });
+  }
+
+  drawHUD(ctx, g) {
+    const lm = g.lm;
+    // ── Панель справа снизу ─────────────────────────────────────────
+    const pw = 268, ph = 148;
+    const px = GW - pw - 22, py = GH - ph - 22;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.beginPath(); ctx.roundRect(px, py, pw, ph, 14); ctx.fill();
+    ctx.strokeStyle = 'rgba(200,160,30,0.32)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.roundRect(px, py, pw, ph, 14); ctx.stroke();
+
+    // Монеты
+    ctx.fillStyle = '#FFD700'; ctx.font = 'bold 25px Unutterable, "Courier New", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('🪙 ' + g.coins, px + 18, py + 36);
+
+    // Таймер
+    const sec = lm.secLeft;
+    const urgent = sec <= 10;
+    ctx.fillStyle = urgent ? '#ff4444' : '#00ffaa';
+    if (urgent) { ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 14; }
+    ctx.font = `bold ${urgent ? 44 : 38}px Unutterable, "Courier New", monospace`;
+    ctx.fillText('⏱ ' + String(sec).padStart(2,'0') + 's', px + 18, py + 84);
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = '#9999ff'; ctx.font = 'bold 20px Unutterable, "Courier New", monospace';
+    ctx.fillText('LVL ' + lm.level + '/' + TOTAL_LEVELS, px + 18, py + 116);
+
+    ctx.fillStyle = '#555'; ctx.font = '14px Unutterable, "Courier New", monospace';
+    ctx.fillText('BESт: ' + g.bestScore, px + 18, py + 140);
+
+    // ── Комбо (вверху по центру) ────────────────────────────────────
+    if (g.combo >= 2) this._drawCombo(ctx, g);
+  }
+
+  _drawCombo(ctx, g) {
+    const cx = GW / 2, cy = 72;
+    const w  = 290, h  = 76;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.58)';
+    ctx.beginPath(); ctx.roundRect(cx - w/2, cy - h/2, w, h, 10); ctx.fill();
+
+    const pulse = 1 + Math.sin(g.time * 0.008) * 0.04;
+    ctx.save();
+    ctx.translate(cx, cy); ctx.scale(pulse, pulse);
+    ctx.textAlign = 'center';
+    const active = g.comboMult > 1;
+    ctx.fillStyle = active ? '#ff6600' : '#ffbb00';
+    ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 14;
+    ctx.font = 'bold 30px Unutterable, "Courier New", monospace';
+    ctx.fillText('COMBO x' + g.combo, 0, -6);
+
+    if (active) {
+      ctx.shadowBlur = 0; ctx.fillStyle = '#ff3300';
+      ctx.font = 'bold 18px Unutterable, "Courier New", monospace';
+      ctx.fillText('✨ ×2 МОНЕтЫ! (' + Math.ceil(g.comboLeft/1000) + 's)', 0, 24);
+    }
+    ctx.restore();
+    ctx.textAlign = 'left'; ctx.shadowBlur = 0;
+  }
+
+  drawFloats(ctx) {
+    ctx.textAlign = 'center';
+    this.floats.forEach(f => {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, f.life);
+      ctx.fillStyle = f.color;
+      ctx.font = `bold ${f.size}px Unutterable, "Courier New", monospace`;
+      ctx.shadowColor = f.color; ctx.shadowBlur = 10;
+      ctx.fillText(f.text, f.x, f.y);
+      ctx.restore();
+    });
+    ctx.textAlign = 'left'; ctx.shadowBlur = 0;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   КЛАСС: Game — главный класс, управляет всем
+   ═══════════════════════════════════════════════════════════════════════ */
+class Game {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx    = canvas.getContext('2d');
+
+    this.bgScaleX = 1920 / 1376;   // ≈ 1.395
+    this.bgScaleY = 1080 / 768;    // ≈ 1.406
+
+    // Состояния: 'menu' | 'playing' | 'levelComplete' | 'win'
+    this.state = 'menu'; // будет обновлено через _setState после полной инициализации
+
+    // Ввод
+    this.mx = GW / 2;
+    this.my = GH / 2;
+
+    // Подсистемы
+    this.snd    = new SoundManager();
+    this.weapon = new Weapon();
+    this.lm     = new LevelManager();
+    this.ui     = new UI();
+
+    // Объекты мира
+    this.monsters  = [];
+    this.particles = [];
+    this.confetti  = [];
+
+    // Статистика
+    this.coins     = 0;
+    this.bestScore = parseInt(localStorage.getItem('hollyHunterBest') || '0');
+    this.combo     = 0;    // Убийств подряд без промаха
+    this.comboMult = 1;    // 1 или 2
+    this.comboLeft = 0;    // Мс оставшихся для x2
+
+    // HP игрока
+    this.playerHp    = 10;
+    this.playerMaxHp = 10;
+    this.damageVignette = 0; // красная виньетка при уроне (0..1)
+
+    // Баффы от магазина (сбрасываются после уровня)
+    this.activeBuffs = { dmgMult: 1, speedDebuff: 1.0 };
+
+    // Ожидание очистки поля перед сменой уровня
+    this.levelClearing    = false;
+    this.warned10sec      = false; // флаг «осталось 10 сек» (сбрасывается при старте уровня)
+    this.tentacleDeathIdx = 0;    // round-robin счётчик звуков смерти тентакли
+    this.bigDeathIdx      = 0;    // round-robin счётчик звуков смерти большого монстра
+
+    // Трекинг отложенных звуков (чтобы отменять при game over)
+    this._soundTimeouts = [];
+
+    // Магазин
+    this.shopOffer     = [];
+    this.shopNextLevel = 2;
+
+    // Экран Level Complete
+    this.lcAlpha  = 0;
+    this.lcTimer  = 0;
+    this.lcLevel  = 0;
+    this.lcBonus  = 0;
+
+    // Screen shake
+    this.shakeX = 0;
+    this.shakeY = 0;
+    this.shakePow = 0;
+
+    // Молния и дождь (активны с 3-го уровня)
+    this.lightningAlpha  = 0;
+    this.lightningTimer  = rnd(15000, 20000);
+    this.lightningBolt   = null;   // {x1,y1,x2,y2, segs, life} — удар молнии
+    this.boltAlpha       = 0;
+    this.rainDrops       = [];     // капли дождя [{x,y,spd,len}]
+
+    // Время (мс от старта, для анимаций)
+    this.time = 0;
+
+    // Конфетти-таймер
+    this.confettiTimer = 0;
+
+    // Изображения
+    this.bgImg = new Image();
+    this.bgImg.src = LOCATIONS.haunted_building.bg; // background_clean.jpg
+    this.bgLoaded = false;
+    this.bgImg.onload = () => { this.bgLoaded = true; };
+
+    // Источник спрайтов монстров (background.jpg — тот же фон, но с монстрами)
+    this.monstersImg = new Image();
+    this.monstersImg.src = 'images/background_monsters.jpg';
+    this.monstersImgLoaded = false;
+    this.monstersImg.onerror = () => console.warn('[HolyHunter] images/background_monsters.jpg не найден — монстры не отобразятся');
+    this.monstersImg.onload = () => { this.monstersImgLoaded = true; };
+
+    this.winImg = new Image();
+    this.winImg.src = 'images/win.jpg';
+    this.winLoaded = false;
+    this.winImg.onload = () => { this.winLoaded = true; };
+
+    this.gameOverImg = new Image();
+    this.gameOverImg.src = 'images/game_over.jpg';
+    this.gameOverLoaded = false;
+    this.gameOverImg.onload = () => { this.gameOverLoaded = true; };
+
+    // PNG-спрайты для tentacle и bigMonster
+    this.spriteImgs  = { tentacle: [], bigMonster: [] };
+    this.spriteReady = { tentacle: [], bigMonster: [] };
+    for (const [type, files] of Object.entries(SPRITE_FILES)) {
+      files.forEach((src, i) => {
+        const img = new Image();
+        img.src = src;
+        img.onerror = () => console.warn('[HolyHunter] Не найден спрайт:', src);
+        img.onload  = () => { this.spriteReady[type][i] = true; };
+        this.spriteImgs[type].push(img);
+      });
+    }
+    this.spawnCounters = { tentacle: 0, bigMonster: 0 };
+
+    // Кнопки
+    this.btnStart    = { x: GW/2-200, y: GH/2+65, w: 400, h: 74 };
+    this.btnReset    = { x: GW/2-165, y: GH-168,  w: 330, h: 66 };
+    this.btnResume   = { x: GW/2-200, y: GH/2+30, w: 400, h: 74 };
+    this.btnGameOver = { x: GW/2-200, y: GH-120, w: 400, h: 66 };
+    // Магазин: 3 карточки по центру
+    this.btnShopItems = [
+      { x: 390,  y: 380, w: 340, h: 220 },
+      { x: 790,  y: 380, w: 340, h: 220 },
+      { x: 1190, y: 380, w: 340, h: 220 },
+    ];
+    this.btnSkipShop = { x: GW/2-140, y: 630, w: 280, h: 54 };
+    this.btnMute     = { x: GW - 76,  y: 12,  w: 56,  h: 56  };
+
+    const SW = 560, SH = 20;
+    this.sliders = {
+      game:  { x: GW/2 - SW/2, y: GH/2 + 160, w: SW, h: SH, val: 1.0 },
+      voice: { x: GW/2 - SW/2, y: GH/2 + 260, w: SW, h: SH, val: 1.0 },
+    };
+    this.draggingSlider = null;
+
+    this._input();
+    this._setState('menu'); // установить начальный курсор
+    this._loop(0);
+  }
+
+  // ── Ввод ─────────────────────────────────────────────────────────────
+  _input() {
+    const c = this.canvas;
+
+    c.addEventListener('mousemove', e => {
+      const r  = c.getBoundingClientRect();
+      this.mx  = (e.clientX - r.left) * (GW / r.width);
+      this.my  = (e.clientY - r.top)  * (GH / r.height);
+      if (this.draggingSlider) this._mouseDrag(this.mx);
+    });
+
+    c.addEventListener('mousedown', e => {
+      const r  = c.getBoundingClientRect();
+      const cx = (e.clientX - r.left) * (GW / r.width);
+      const cy = (e.clientY - r.top)  * (GH / r.height);
+      this._mouseDown(cx, cy);
+    });
+
+    c.addEventListener('mouseup', () => { this.draggingSlider = null; });
+
+    c.addEventListener('click', e => {
+      const r  = c.getBoundingClientRect();
+      const cx = (e.clientX - r.left) * (GW / r.width);
+      const cy = (e.clientY - r.top)  * (GH / r.height);
+      this._click(cx, cy);
+    });
+
+    // F — полный экран, Esc — пауза
+    document.addEventListener('keydown', e => {
+      if (e.key === 'f' || e.key === 'F') this._fullscreen();
+      if (e.key === 'Escape') {
+        if (this.state === 'playing') this._setState('paused');
+        else if (this.state === 'paused') this._resume();
+      }
+    });
+
+    // Разблокировка Audio (нужно взаимодействие пользователя)
+    const unlock = () => {
+      this.snd.loop('ambient');
+      document.removeEventListener('click', unlock);
+      document.removeEventListener('keydown', unlock);
+    };
+    document.addEventListener('click', unlock);
+    document.addEventListener('keydown', unlock);
+  }
+
+  _fullscreen() {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{});
+    else document.exitFullscreen().catch(()=>{});
+  }
+
+  _click(x, y) {
+    const hit = (b) => x >= b.x && x <= b.x+b.w && y >= b.y && y <= b.y+b.h;
+
+    if (hit(this.btnMute)) { this.snd.toggleMute(); return; }
+
+    if (this.state === 'menu') {
+      if (hit(this.btnStart)) this._startGame();
+    } else if (this.state === 'playing') {
+      this._shoot(x, y);
+    } else if (this.state === 'paused') {
+      if (hit(this.btnResume)) this._resume();
+    } else if (this.state === 'gameover') {
+      if (hit(this.btnGameOver)) this._goMenu();
+    } else if (this.state === 'shop') {
+      this.btnShopItems.forEach((b, i) => { if (hit(b)) this._buyShop(i); });
+      if (hit(this.btnSkipShop)) this._startNextLevel();
+    } else if (this.state === 'win') {
+      if (hit(this.btnReset)) this._goMenu();
+    }
+  }
+
+  // ── Управление курсором по состоянию ────────────────────────────────
+  _setState(state) {
+    this.state = state;
+    const showCursor = state === 'menu' || state === 'win' || state === 'paused'
+                    || state === 'gameover' || state === 'shop';
+    this.canvas.style.cursor = showCursor ? 'default' : 'none';
+  }
+
+  _resume() {
+    this._setState('playing');
+  }
+
+  // ── Управление состояниями ───────────────────────────────────────────
+  _startGame() {
+    this._setState('playing');
+    this.coins          = 0;
+    this.combo          = 0;
+    this.comboMult      = 1;
+    this.comboLeft      = 0;
+    this.monsters       = [];
+    this.particles      = [];
+    this.confetti       = [];
+    this.playerHp       = this.playerMaxHp;
+    this.damageVignette = 0;
+    this.activeBuffs    = { dmgMult: 1, speedDebuff: 1.0 };
+    this.levelClearing    = false;
+    this.warned10sec      = false;
+    this.tentacleDeathIdx = 0;
+    this.bigDeathIdx      = 0;
+    this._lastVoiceTime   = 0;
+    this.lowHpVoicePlayed = false;
+    this._startLevel(1);
+    this.snd.loop('ambient');
+  }
+
+  _goMenu() {
+    this.snd.stopAll();
+    this._setState('menu');
+    this.confetti = [];
+    this.snd.loop('ambient');
+  }
+
+  _levelComplete(lvl) {
+    this._setState('levelComplete');
+    this.lcLevel = lvl;
+    this.lcAlpha = 0;
+    this.lcTimer = LVL_PAUSE_MS;
+
+    // Небольшой бонус за оставшееся время
+    this.lcBonus = Math.floor(this.lm.secLeft / 6) * 5;
+    this.coins  += this.lcBonus;
+    if (this.lcBonus > 0)
+      this.ui.addFloat(GW/2, GH/2 + 100, '+' + this.lcBonus + ' 🪙 TIME BONUS!', '#FFD700', 32);
+  }
+
+  _startWin() {
+    this._setState('win');
+    if (this.coins > this.bestScore) {
+      this.bestScore = this.coins;
+      localStorage.setItem('hollyHunterBest', this.bestScore);
+    }
+    this.snd.stop('ambient');
+    this.snd.loop('rock');
+    this.confettiTimer = 0;
+    this._soundTimeouts.push(setTimeout(() => this._playVoice('win'), 2000));
+  }
+
+  // ── Стрельба ─────────────────────────────────────────────────────────
+  _shoot(x, y) {
+    if (!this.weapon.tryShoot()) return;
+    this.snd.play('shot');
+
+    // Частицы вспышки
+    for (let i = 0; i < 10; i++) this.particles.push(new Particle(x, y, 'muzzle'));
+
+    // Проверка попаданий
+    let hit = false;
+    for (let i = this.monsters.length - 1; i >= 0; i--) {
+      const m = this.monsters[i];
+      if (m.gone || m.dead || m.phase === 'retreating') continue;
+
+      const hc = m.hitCenter();
+      const hr = m.hitRadius();
+      const dx = x - hc.x, dy = y - hc.y;
+
+      if (dx*dx + dy*dy <= hr*hr) {
+        hit = true;
+        let killed = m.hit();
+        if (!killed && this.activeBuffs.dmgMult > 1) killed = m.hit(); // x2 урон
+
+        if (killed) {
+          this._onKill(m, hc.x, hc.y);
+        } else {
+          const pt = m.type === 'tentacle' ? 'slime' : 'blood';
+          for (let p = 0; p < 8; p++) this.particles.push(new Particle(hc.x, hc.y, pt));
+          this.snd.play('death');
+        }
+        break;
+      }
+    }
+
+    if (!hit) this.combo = 0; // Промах — сброс комбо
+  }
+
+  _onKill(monster, px, py) {
+    const pt = monster.type === 'tentacle' ? 'slime' : 'blood';
+    for (let i = 0; i < 20; i++) this.particles.push(new Particle(px, py, pt));
+    if (monster.type === 'bigMonster') {
+      this.bigDeathIdx = (this.bigDeathIdx + 1) % 2;
+      this.snd.play('bigDeath' + (this.bigDeathIdx + 1));
+      this._soundTimeouts.push(setTimeout(() => this._playVoice('big'), 600));
+    } else if (monster.type === 'tentacle') {
+      this.tentacleDeathIdx = (this.tentacleDeathIdx + 1) % 6;
+      this.snd.play('tentacleDeath' + (this.tentacleDeathIdx + 1));
+      if (Math.random() < 0.30) this._soundTimeouts.push(setTimeout(() => this._playVoice('kill'), 300));
+    } else {
+      this.snd.play('death');
+      if (Math.random() < 0.30) this._soundTimeouts.push(setTimeout(() => this._playVoice('kill'), 300));
+    }
+    this.snd.play('coin');
+
+    // Комбо
+    this.combo++;
+    if (this.combo >= COMBO_KILLS && this.comboMult === 1) {
+      this.comboMult = 2;
+      this.comboLeft = COMBO_DUR_MS;
+      for (let i = 0; i < 22; i++) this.particles.push(new Particle(GW/2, GH/2, 'spark'));
+      this.ui.addFloat(GW/2, GH/2 - 80, '🔥 COMBO! ×2 МОНЕтЫ!', '#ff6600', 46);
+      this._soundTimeouts.push(setTimeout(() => this._playVoice('combo'), 800));
+    }
+
+    const earned = monster.coins * this.comboMult;
+    this.coins += earned;
+    const suffix = this.comboMult > 1 ? ' (×2)' : '';
+    this.ui.addFloat(px, py - 40, '+' + earned + ' 🪙' + suffix, '#FFD700', 30);
+    if (this.combo >= 3) this.ui.addFloat(px, py - 78, 'x' + this.combo + ' COMBO!', '#ff8800', 22);
+
+    if (monster.type === 'bigMonster') this.shakePow = 15;
+  }
+
+  _onEscape(monster) {
+    const dmg = monster.type === 'bigMonster' ? 2 : 1;
+    this.playerHp = Math.max(0, this.playerHp - dmg);
+    this.damageVignette = 1.0;
+    this.shakePow = Math.max(this.shakePow, 5);
+    const hc = monster.hitCenter();
+    this.ui.addFloat(hc.x, hc.y - 30, '-' + dmg + ' ❤️', '#ff4444', 28);
+    // Звук зависит от типа монстра, затем — звон разбитого сердца
+    if (monster.type === 'bigMonster') {
+      this.snd.play('bigLaugh');
+    } else if (monster.type === 'tentacle') {
+      this.snd.play('tentacleDamage');
+    } else {
+      this.snd.play('whisper');
+    }
+    this._soundTimeouts.push(setTimeout(() => this.snd.play('heartbreak'), 700));
+    this._soundTimeouts.push(setTimeout(() => this._playVoice('dmg'), 1200));
+    if (this.playerHp <= 2 && !this.lowHpVoicePlayed) {
+      this.lowHpVoicePlayed = true;
+      this._soundTimeouts.push(setTimeout(() => this._playVoice('lowhp'), 1500));
+    }
+    if (this.playerHp <= 0) this._gameOver();
+  }
+
+  _gameOver() {
+    this._soundTimeouts.forEach(clearTimeout);
+    this._soundTimeouts = [];
+    // Запускаем gameover-звук ДО stopAll, чтобы клон не попал в stopAll
+    this.snd.play('gameover');
+    // Останавливаем все звуки кроме только что созданного клона gameover
+    Object.entries(this.snd._sounds).forEach(([k, s]) => {
+      if (k === 'gameover') return;
+      try { s.audio.pause(); s.audio.currentTime = 0; } catch(_) {}
+      if (s.clones) { s.clones.forEach(c => { try { c.pause(); } catch(_) {} }); s.clones = []; }
+    });
+    this._setState('gameover');
+    this.monsters.forEach(m => { m.phase = 'retreating'; m.phaseT = 0; });
+  }
+
+  _mouseDown(cx, cy) {
+    if (this.state !== 'paused') return;
+    for (const [key, s] of Object.entries(this.sliders)) {
+      if (cx >= s.x && cx <= s.x + s.w && cy >= s.y - 10 && cy <= s.y + s.h + 10) {
+        this.draggingSlider = key;
+        this._applySlider(key, cx);
+        return;
+      }
+    }
+  }
+
+  _mouseDrag(cx) {
+    if (!this.draggingSlider) return;
+    this._applySlider(this.draggingSlider, cx);
+  }
+
+  _applySlider(key, cx) {
+    const s = this.sliders[key];
+    s.val = Math.max(0, Math.min(1, (cx - s.x) / s.w));
+    if (key === 'game')  this.snd.setGameMult(s.val);
+    if (key === 'voice') this.snd.setVoiceMult(s.val);
+  }
+
+  _playVoice(category) {
+    const now = Date.now();
+    if (now - this._lastVoiceTime < VOICE_COOLDOWN_MS) return;
+    const names = VOICE[category];
+    if (!names) return;
+    this.snd.play(names[Math.floor(Math.random() * names.length)]);
+    this._lastVoiceTime = now;
+  }
+
+  _startLevel(n) {
+    this.lowHpVoicePlayed = false;
+    this.lm.start(n);
+    this._soundTimeouts.push(setTimeout(() => this._playVoice('lvl'), 1500));
+  }
+
+  _openShop(nextLevel) {
+    this._setState('shop');
+    this.shopNextLevel = nextLevel;
+    this.activeBuffs = { dmgMult: 1, speedDebuff: 1.0 }; // сброс баффов предыдущего уровня
+    this._soundTimeouts.push(setTimeout(() => this._playVoice('shop'), 1000));
+    this.shopOffer = [
+      { label: '+3 ❤️ ЗДОРОВЬЕ',   desc: 'Восстановить 3 сердца',           cost: 400, type: 'hp'   },
+      { label: '⚔️ ДВОЙНОЙ УРОН',  desc: 'x2 урон на следующий уровень',    cost: 550, type: 'dmg'  },
+      { label: '🐢 ЗАМЕДЛЕНИЕ',    desc: 'Монстры медленнее на уровень',    cost: 500, type: 'slow' },
+    ];
+  }
+
+  _buyShop(idx) {
+    const offer = this.shopOffer[idx];
+    if (!offer || this.coins < offer.cost) return;
+    this.coins -= offer.cost;
+    if (offer.type === 'hp')   this.playerHp = Math.min(this.playerMaxHp, this.playerHp + 3);
+    if (offer.type === 'dmg')  this.activeBuffs.dmgMult = 2;
+    if (offer.type === 'slow') this.activeBuffs.speedDebuff = 0.6;
+    this._startNextLevel();
+  }
+
+  _startNextLevel() {
+    this._setState('playing');
+    this.monsters      = [];
+    this.particles     = [];
+    this.levelClearing = false;
+    this.warned10sec   = false;
+    this._startLevel(this.shopNextLevel);
+  }
+
+  // ── Спавн монстра ────────────────────────────────────────────────────
+  _spawn() {
+    const loc  = LOCATIONS.haunted_building;
+    const roll = Math.random();
+    let type, pos;
+
+    if (roll < 0.50) {
+      type = 'windowFace';
+      pos  = loc.windowSpots[rndInt(0, loc.windowSpots.length - 1)];
+    } else if (roll < 0.85) {
+      type = 'tentacle';
+      pos  = loc.groundSpots[rndInt(0, loc.groundSpots.length - 1)];
+    } else {
+      type = 'bigMonster';
+      pos  = loc.bigSpot;
+      // Один BigMonster за раз
+      if (this.monsters.some(m => !m.gone && m.type === 'bigMonster')) return;
+    }
+
+    // Не спавним в уже занятой точке
+    if (this.monsters.some(m => !m.gone && m.baseX === pos.x && m.baseY === pos.y)) return;
+
+    // Для tentacle и bigMonster выдаём PNG-спрайт по очереди
+    // Всегда передаём объект Image — готовность проверяется в draw()
+    let spriteImg = null;
+    if (type === 'tentacle' || type === 'bigMonster') {
+      const imgs = this.spriteImgs[type];
+      const idx  = this.spawnCounters[type]++ % imgs.length;
+      spriteImg  = imgs[idx];
+    }
+
+    const cfg = this.activeBuffs.speedDebuff < 1
+      ? { ...this.lm.cfg, speedMult: this.lm.cfg.speedMult * this.activeBuffs.speedDebuff }
+      : this.lm.cfg;
+    this.monsters.push(new Monster(type, pos, cfg, spriteImg));
+  }
+
+  // ── Главный цикл ─────────────────────────────────────────────────────
+  _loop(ts) {
+    const dt = Math.min(ts - (this._lastTs || ts), 50);
+    this._lastTs = ts;
+    this.time   += dt;
+
+    this._update(dt);
+    this._draw();
+
+    requestAnimationFrame(t => this._loop(t));
+  }
+
+  _update(dt) {
+    if (this.state === 'paused' || this.state === 'gameover' || this.state === 'shop') return;
+
+    // Screen shake
+    if (this.shakePow > 0) {
+      this.shakeX = rnd(-this.shakePow, this.shakePow);
+      this.shakeY = rnd(-this.shakePow, this.shakePow);
+      this.shakePow *= 0.80;
+      if (this.shakePow < 0.5) { this.shakePow = 0; this.shakeX = 0; this.shakeY = 0; }
+    }
+
+    this.ui.update(dt);
+
+    if (this.state === 'playing')       this._updPlaying(dt);
+    if (this.state === 'levelComplete') this._updLC(dt);
+    if (this.state === 'win')           this._updWin(dt);
+  }
+
+  _updPlaying(dt) {
+    this.weapon.update(this.mx, this.my, dt);
+
+    // Таймер комбо
+    if (this.comboLeft > 0) {
+      this.comboLeft -= dt;
+      if (this.comboLeft <= 0) { this.comboLeft = 0; this.comboMult = 1; this.combo = 0; }
+    }
+
+    // Молния и дождь — только с 3-го уровня
+    if (this.lm.level >= 3) {
+      // Дождь: инициализация капель
+      if (this.rainDrops.length === 0) {
+        for (let i = 0; i < 220; i++) {
+          this.rainDrops.push({ x: rnd(0, GW), y: rnd(0, GH), spd: rnd(14, 22), len: rnd(12, 26) });
+        }
+      }
+      // Обновление позиций
+      for (const d of this.rainDrops) {
+        d.y += d.spd * dt / 16;
+        d.x -= d.spd * 0.18 * dt / 16;
+        if (d.y > GH + 30) { d.y = rnd(-40, 0); d.x = rnd(0, GW); }
+      }
+
+      // Вспышки
+      this.lightningTimer -= dt;
+      if (this.lightningTimer <= 0) {
+        this.lightningAlpha = 0.55 + rnd(0, 0.25);
+        this.lightningTimer = rnd(8000, 14000); // чаще чем раньше
+        // Генерируем зигзаг удара молнии
+        const bx = rnd(GW * 0.2, GW * 0.8);
+        const segs = [];
+        let cx = bx, cy = 0;
+        while (cy < GH * 0.75) {
+          const nx = cx + rnd(-60, 60);
+          const ny = cy + rnd(60, 120);
+          segs.push([cx, cy, nx, ny]);
+          cx = nx; cy = ny;
+        }
+        this.lightningBolt  = segs;
+        this.boltAlpha      = 1.0;
+        this.shakePow       = Math.max(this.shakePow, 8);
+        // Гром — с задержкой 200-500мс (свет быстрее звука)
+        const tName = Math.random() < 0.5 ? 'thunder1' : 'thunder2';
+        this._soundTimeouts.push(setTimeout(() => this.snd.play(tName), 200 + rnd(0, 300)));
+      }
+      if (this.lightningAlpha > 0) { this.lightningAlpha -= dt / 80; if (this.lightningAlpha < 0) this.lightningAlpha = 0; }
+      if (this.boltAlpha      > 0) { this.boltAlpha      -= dt / 120; if (this.boltAlpha < 0) this.boltAlpha = 0; }
+    } else {
+      this.rainDrops = []; // сбросить если уровень < 3
+    }
+
+    // Уровень
+    const ev = this.lm.update(dt, this.monsters.filter(m => !m.gone).length);
+    if (ev === 'spawn' && !this.levelClearing) this._spawn();
+    if (ev === 'end') {
+      this.levelClearing = true;
+      const alive = this.monsters.filter(m => !m.gone).length;
+      if (alive >= 2) this.ui.addFloat(GW/2, GH/2 - 60, 'ДОБЕЙ ИХ!', '#ff4444', 42);
+    }
+
+    // 10-секундное предупреждение
+    if (!this.warned10sec && !this.levelClearing && this.lm.active && this.lm.secLeft <= 10 && this.lm.secLeft > 0) {
+      this.warned10sec = true;
+      this.ui.addFloat(GW/2, GH/2 - 60, 'ОСТАЛОСЬ 10 СЕКУНД!', '#ff4444', 42);
+    }
+
+    // Виньетка урона — затухает
+    if (this.damageVignette > 0) {
+      this.damageVignette -= dt / 500;
+      if (this.damageVignette < 0) this.damageVignette = 0;
+    }
+
+    // Монстры и частицы
+    this.monsters.forEach(m => m.update(dt, this.time));
+    // Монстры ушли живыми — наносят урон
+    this.monsters.forEach(m => { if (m.gone && !m.dead) this._onEscape(m); });
+    this.monsters = this.monsters.filter(m => !m.gone);
+    this.particles.forEach(p => p.update());
+    this.particles = this.particles.filter(p => p.alive);
+
+    // Поле очищено — переходим к следующему уровню
+    if (this.levelClearing && this.monsters.length === 0) {
+      this.levelClearing = false;
+      if (this.lm.level >= TOTAL_LEVELS) this._startWin(); // последний уровень → сразу победа
+      else this._levelComplete(this.lm.level);
+    }
+  }
+
+  _updLC(dt) {
+    this.lcTimer -= dt;
+
+    // Плавный fade-in/out
+    const elapsed = LVL_PAUSE_MS - this.lcTimer;
+    if      (elapsed < 400)            this.lcAlpha = elapsed / 400;
+    else if (this.lcTimer < 600)       this.lcAlpha = this.lcTimer / 600;
+    else                               this.lcAlpha = 1;
+
+    this.particles.forEach(p => p.update());
+    this.particles = this.particles.filter(p => p.alive);
+
+    if (this.lcTimer <= 0) {
+      const next = this.lcLevel + 1;
+      if (next <= TOTAL_LEVELS) {
+        if (this.lcLevel === 3 || this.lcLevel === 4) this._openShop(next); // магазин перед уровнями 4 и 5
+        else { this._setState('playing'); this.monsters = []; this.particles = []; this.warned10sec = false; this._startLevel(next); }
+      } else this._startWin();
+    }
+  }
+
+  _updWin(dt) {
+    this.confettiTimer -= dt;
+    if (this.confettiTimer <= 0) {
+      for (let i = 0; i < 6; i++) this.confetti.push(new Particle(rnd(0, GW), -15, 'confetti'));
+      this.confettiTimer = 85;
+    }
+    this.confetti.forEach(p => p.update());
+    this.confetti = this.confetti.filter(p => p.alive && p.y < GH + 60);
+  }
+
+  // ── Рисование ────────────────────────────────────────────────────────
+  _draw() {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(this.shakeX, this.shakeY);
+
+    if      (this.state === 'menu')          this._drawMenu(ctx);
+    else if (this.state === 'playing')       this._drawPlaying(ctx);
+    else if (this.state === 'paused')        this._drawPaused(ctx);
+    else if (this.state === 'levelComplete') this._drawLC(ctx);
+    else if (this.state === 'shop')          this._drawShop(ctx);
+    else if (this.state === 'gameover')      this._drawGameOver(ctx);
+    else if (this.state === 'win')           this._drawWin(ctx);
+
+    // Кнопка звука — поверх всего, во всех состояниях
+    const mb = this.btnMute;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.beginPath(); ctx.roundRect(mb.x, mb.y, mb.w, mb.h, 10); ctx.fill();
+    ctx.font = '32px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(this.snd.muted ? '🔇' : '🔊', mb.x + mb.w / 2, mb.y + mb.h / 2);
+    ctx.textBaseline = 'alphabetic';
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  _drawBg(ctx) {
+    if (this.bgLoaded) {
+      ctx.drawImage(this.bgImg, 0, 0, GW, GH);
+    } else {
+      this._drawFallbackBg(ctx);
+    }
+  }
+
+  // Запасной фон если background.jpg не найден
+  _drawFallbackBg(ctx) {
+    const g = ctx.createLinearGradient(0, 0, 0, GH);
+    g.addColorStop(0,   '#060610');
+    g.addColorStop(0.5, '#0e0608');
+    g.addColorStop(1,   '#040204');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, GW, GH);
+
+    // Здание
+    ctx.fillStyle = '#0d0d1e';
+    ctx.fillRect(70, 175, 1480, 840);
+
+    // Окна
+    for (let row = 0; row < 4; row++) {
+      for (let col = 0; col < 9; col++) {
+        const wx = 110 + col * 152, wy = 210 + row * 195;
+        const lit = Math.random() < 0.25;
+        ctx.fillStyle = lit ? '#2a1800' : '#080812';
+        ctx.fillRect(wx, wy, 110, 88);
+        if (lit) {
+          ctx.fillStyle = 'rgba(255,180,30,0.06)';
+          ctx.fillRect(wx-8, wy-8, 126, 104);
+        }
+        ctx.strokeStyle = '#141424'; ctx.lineWidth = 2;
+        ctx.strokeRect(wx, wy, 110, 88);
+      }
+    }
+    // Трава
+    ctx.fillStyle = '#081006'; ctx.fillRect(0, 895, GW, GH-895);
+
+    // Туман
+    const fog = ctx.createLinearGradient(0, GH-280, 0, GH);
+    fog.addColorStop(0, 'rgba(0,0,0,0)'); fog.addColorStop(1, 'rgba(5,5,20,0.75)');
+    ctx.fillStyle = fog; ctx.fillRect(0, GH-280, GW, 280);
+
+    ctx.fillStyle = 'rgba(255,80,80,0.3)';
+    ctx.font = 'bold 20px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('[ Поместите background.jpg в папку с игрой ]', GW/2, 155);
+    ctx.textAlign = 'left';
+  }
+
+  _drawMenu(ctx) {
+    this._drawBg(ctx);
+
+    ctx.fillStyle = 'rgba(0,0,0,0.64)'; ctx.fillRect(0, 0, GW, GH);
+    ctx.textAlign = 'center';
+
+    // Заголовок
+    const pulse = 0.7 + Math.sin(this.time * 0.003) * 0.3;
+    ctx.shadowColor = `rgba(210,25,25,${pulse})`; ctx.shadowBlur = 65;
+    ctx.fillStyle = '#dd1e1e';
+    ctx.font = 'bold 110px Unutterable, "Courier New", monospace';
+    ctx.fillText('HOLY HUNTER', GW/2, GH/2 - 170);
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ffcccc';
+    ctx.font = 'bold 34px Unutterable, "Courier New", monospace';
+    ctx.fillText('Для Алины ❤️', GW/2, GH/2 - 92);
+
+    ctx.fillStyle = 'rgba(165,165,165,0.8)';
+    ctx.font = '22px Unutterable, "Courier New", monospace';
+    ctx.fillText('5 уровней  ·  3 вида монстров  ·  Собирай монеты!', GW/2, GH/2 - 35);
+
+    if (this.bestScore > 0) {
+      ctx.fillStyle = '#FFD700'; ctx.shadowColor = '#FFD700'; ctx.shadowBlur = 8;
+      ctx.font = 'bold 24px Unutterable, "Courier New", monospace';
+      ctx.fillText('🏆 Рекорд: ' + this.bestScore + ' монет', GW/2, GH/2 + 10);
+      ctx.shadowBlur = 0;
+    }
+
+    // Кнопка Start
+    const b = this.btnStart;
+    const bp = 0.96 + Math.sin(this.time * 0.004) * 0.04;
+    ctx.save();
+    ctx.translate(GW/2, b.y + b.h/2); ctx.scale(bp, bp);
+    ctx.shadowColor = '#ff2222'; ctx.shadowBlur = 22;
+    ctx.fillStyle = '#bb1010';
+    ctx.beginPath(); ctx.roundRect(-b.w/2, -b.h/2, b.w, b.h, 14); ctx.fill();
+    ctx.shadowBlur = 0; ctx.fillStyle = '#fff';
+    ctx.font = 'bold 30px Unutterable, "Courier New", monospace';
+    ctx.fillText('▶  НАЧАтЬ ИГРУ', 0, 11);
+    ctx.restore();
+
+    ctx.fillStyle = 'rgba(110,110,110,0.7)';
+    ctx.font = '18px Unutterable, "Courier New", monospace';
+    ctx.fillText('ЛКМ — стрелять   |   F — полный экран   |   Esc — пауза', GW/2, GH - 34);
+
+    ctx.textAlign = 'left'; ctx.shadowBlur = 0;
+  }
+
+  _drawPaused(ctx) {
+    this._drawPlaying(ctx); // замороженный кадр игры под паузой
+    ctx.fillStyle = 'rgba(0,0,0,0.62)';
+    ctx.fillRect(0, 0, GW, GH);
+
+    ctx.textAlign = 'center';
+    ctx.shadowColor = '#55aaff'; ctx.shadowBlur = 45;
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 96px Unutterable, "Courier New", monospace';
+    ctx.fillText('ПАУЗА', GW/2, GH/2 - 90);
+    ctx.shadowBlur = 0;
+
+    // Кнопка "Продолжить"
+    const b = this.btnResume;
+    const bp = 0.97 + Math.sin(this.time * 0.004) * 0.03;
+    ctx.save();
+    ctx.translate(GW/2, b.y + b.h/2); ctx.scale(bp, bp);
+    ctx.shadowColor = '#2aff6a'; ctx.shadowBlur = 22;
+    ctx.fillStyle = '#1a7a3a';
+    ctx.beginPath(); ctx.roundRect(-b.w/2, -b.h/2, b.w, b.h, 14); ctx.fill();
+    ctx.shadowBlur = 0; ctx.fillStyle = '#fff';
+    ctx.font = 'bold 30px Unutterable, "Courier New", monospace';
+    ctx.fillText('▶  ПРОДОЛЖИтЬ', 0, 11);
+    ctx.restore();
+
+    ctx.fillStyle = 'rgba(110,110,110,0.7)';
+    ctx.font = '18px Unutterable, "Courier New", monospace';
+    ctx.fillText('Esc — продолжить', GW/2, GH - 34);
+
+    // Слайдеры громкости
+    const sliderLabels  = { game: '🔊  ИГРОВЫЕ ЗВУКИ', voice: '🎤  ГОЛОС АЛИНЫ' };
+    const sliderColors  = { game: '#55aaff',            voice: '#ff88cc'            };
+    for (const [key, s] of Object.entries(this.sliders)) {
+      ctx.save();
+      ctx.shadowBlur = 0;
+      ctx.font = 'bold 22px Unutterable, "Courier New", monospace';
+      ctx.fillStyle = sliderColors[key];
+      ctx.textAlign = 'left';
+      ctx.fillText(sliderLabels[key], s.x, s.y - 12);
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'right';
+      ctx.fillText(Math.round(s.val * 100) + '%', s.x + s.w, s.y - 12);
+      // Трек
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.beginPath(); ctx.roundRect(s.x, s.y, s.w, s.h, s.h / 2); ctx.fill();
+      // Заполнение
+      if (s.val > 0) {
+        ctx.fillStyle = sliderColors[key];
+        ctx.shadowColor = sliderColors[key]; ctx.shadowBlur = 10;
+        ctx.beginPath(); ctx.roundRect(s.x, s.y, s.w * s.val, s.h, s.h / 2); ctx.fill();
+      }
+      // Ручка
+      const hx = s.x + s.w * s.val;
+      ctx.shadowColor = sliderColors[key]; ctx.shadowBlur = 14;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(hx, s.y + s.h / 2, 14, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.textAlign = 'left'; ctx.shadowBlur = 0;
+  }
+
+  _drawPlaying(ctx) {
+    this._drawBg(ctx);
+    const img = this.monstersImgLoaded ? this.monstersImg : null;
+    // windowFace и tentacle рисуются за передним планом здания
+    this.monsters.forEach(m => { if (m.type !== 'bigMonster') m.draw(ctx, this.time, img); });
+    this._drawForeground(ctx); // правый край здания поверх окон и щупалец
+    // bigMonster рисуется поверх здания — он входит с правой стороны снаружи
+    this.monsters.forEach(m => { if (m.type === 'bigMonster') m.draw(ctx, this.time, img); });
+    this.particles.forEach(p => p.draw(ctx));
+    // Дождь (уровень 3+)
+    if (this.rainDrops.length > 0) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(160,200,255,0.35)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (const d of this.rainDrops) {
+        ctx.moveTo(d.x, d.y);
+        ctx.lineTo(d.x - d.len * 0.18, d.y + d.len);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+    // Молния — белая вспышка поверх всей сцены
+    if (this.lightningAlpha > 0) {
+      ctx.save();
+      ctx.globalAlpha = this.lightningAlpha;
+      ctx.fillStyle = '#ddeeff';
+      ctx.fillRect(0, 0, GW, GH);
+      ctx.restore();
+    }
+    // Удар молнии — зигзаг
+    if (this.boltAlpha > 0 && this.lightningBolt) {
+      ctx.save();
+      ctx.globalAlpha = this.boltAlpha;
+      // Широкий светящийся контур
+      ctx.strokeStyle = '#aaccff';
+      ctx.lineWidth = 6;
+      ctx.shadowColor = '#88aaff';
+      ctx.shadowBlur = 20;
+      ctx.beginPath();
+      for (const [x1, y1, x2, y2] of this.lightningBolt) { ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); }
+      ctx.stroke();
+      // Яркое ядро
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      for (const [x1, y1, x2, y2] of this.lightningBolt) { ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); }
+      ctx.stroke();
+      ctx.restore();
+    }
+    // Красная виньетка при уроне
+    if (this.damageVignette > 0) {
+      ctx.save();
+      const vg = ctx.createRadialGradient(GW/2, GH/2, GH*0.25, GW/2, GH/2, GH*0.85);
+      vg.addColorStop(0, 'rgba(180,0,0,0)');
+      vg.addColorStop(1, `rgba(200,0,0,${this.damageVignette * 0.65})`);
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, GW, GH);
+      ctx.restore();
+    }
+    this.weapon.draw(ctx);
+    this.ui.drawHUD(ctx, this);
+    this.ui.drawFloats(ctx);
+    this._drawHearts(ctx);
+  }
+
+  _drawHearts(ctx) {
+    ctx.save();
+    ctx.font = '26px Arial';
+    ctx.textAlign = 'left';
+    for (let i = 0; i < this.playerMaxHp; i++) {
+      const alive = i < this.playerHp;
+      const x = 18 + i * 34, y = 50;
+      ctx.globalAlpha = alive ? 1 : 0.28;
+      // Чёрная обводка
+      ctx.shadowColor = '#000';
+      ctx.shadowBlur  = 0;
+      ctx.lineWidth   = 3;
+      ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+      ctx.strokeText(alive ? '❤️' : '🖤', x, y);
+      // Само сердце с красным свечением
+      ctx.shadowColor = alive ? '#ff0044' : 'transparent';
+      ctx.shadowBlur  = alive ? 8 : 0;
+      ctx.fillText(alive ? '❤️' : '🖤', x, y);
+    }
+    ctx.restore();
+  }
+
+  _drawShop(ctx) {
+    this._drawBg(ctx);
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
+    ctx.fillRect(0, 0, GW, GH);
+    ctx.textAlign = 'center';
+
+    ctx.shadowColor = '#FFD700'; ctx.shadowBlur = 35;
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 72px Unutterable, "Courier New", monospace';
+    ctx.fillText('МАГАЗИН', GW/2, 110);
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = '#aaaaaa'; ctx.font = '24px Unutterable, "Courier New", monospace';
+    ctx.fillText('Монеты: ' + this.coins + ' 🪙        ❤️ ' + this.playerHp + ' / ' + this.playerMaxHp, GW/2, 162);
+
+    // 3 карточки
+    this.shopOffer.forEach((offer, i) => {
+      const b     = this.btnShopItems[i];
+      const canAfford = this.coins >= offer.cost;
+      ctx.save();
+      ctx.fillStyle = canAfford ? 'rgba(15,35,15,0.92)' : 'rgba(35,10,10,0.92)';
+      ctx.shadowColor = canAfford ? '#44ff88' : '#882222'; ctx.shadowBlur = 14;
+      ctx.beginPath(); ctx.roundRect(b.x, b.y, b.w, b.h, 18); ctx.fill();
+      ctx.strokeStyle = canAfford ? '#44ff88' : '#662222'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(b.x, b.y, b.w, b.h, 18); ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 30px Unutterable, "Courier New", monospace';
+      ctx.fillText(offer.label, b.x + b.w/2, b.y + 72);
+
+      ctx.fillStyle = '#bbbbbb'; ctx.font = '18px Unutterable, "Courier New", monospace';
+      ctx.fillText(offer.desc, b.x + b.w/2, b.y + 114);
+
+      ctx.fillStyle = canAfford ? '#FFD700' : '#ff5555';
+      ctx.font = 'bold 34px Unutterable, "Courier New", monospace';
+      ctx.fillText(offer.cost + ' 🪙', b.x + b.w/2, b.y + 170);
+      ctx.restore();
+    });
+
+    // Кнопка "Пропустить"
+    const sb = this.btnSkipShop;
+    ctx.fillStyle = 'rgba(35,35,55,0.88)';
+    ctx.shadowColor = '#5555cc'; ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.roundRect(sb.x, sb.y, sb.w, sb.h, 10); ctx.fill();
+    ctx.shadowBlur = 0; ctx.fillStyle = '#888888';
+    ctx.font = 'bold 20px Unutterable, "Courier New", monospace';
+    ctx.fillText('Пропустить  →', GW/2, sb.y + sb.h/2 + 7);
+
+    ctx.textAlign = 'left';
+  }
+
+  _drawGameOver(ctx) {
+    if (this.gameOverLoaded) {
+      ctx.drawImage(this.gameOverImg, 0, 0, GW, GH);
+      ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, 0, GW, GH);
+    } else {
+      ctx.fillStyle = '#080005'; ctx.fillRect(0, 0, GW, GH);
+      ctx.textAlign = 'center';
+      ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 70;
+      ctx.fillStyle = '#ff2222';
+      ctx.font = 'bold 110px Unutterable, "Courier New", monospace';
+      ctx.fillText('GAME OVER', GW/2, GH/2 - 110);
+      ctx.shadowBlur = 0;
+    }
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 36px Unutterable, "Courier New", monospace';
+    ctx.fillText('Монеты: ' + this.coins + ' 🪙', GW/2, GH - 180);
+
+    const b  = this.btnGameOver;
+    const bp = 0.97 + Math.sin(this.time * 0.003) * 0.03;
+    ctx.save();
+    ctx.translate(GW/2, b.y + b.h/2); ctx.scale(bp, bp);
+    ctx.shadowColor = '#ff2222'; ctx.shadowBlur = 18;
+    ctx.fillStyle = '#8a1010';
+    ctx.beginPath(); ctx.roundRect(-b.w/2, -b.h/2, b.w, b.h, 13); ctx.fill();
+    ctx.shadowBlur = 0; ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 26px Unutterable, "Courier New", monospace';
+    ctx.fillText('↺  ПОПРОБОВАтЬ СНОВА', 0, 10);
+    ctx.restore();
+    ctx.textAlign = 'left';
+  }
+
+  _drawForeground(ctx) {
+    if (!this.bgLoaded) return;
+    const fg = LOCATIONS.haunted_building.foregroundClip;
+    if (!fg) return;
+    ctx.drawImage(this.bgImg, fg.sx, fg.sy, fg.sw, fg.sh, fg.dx, fg.dy, fg.sw, fg.sh);
+  }
+
+  _drawLC(ctx) {
+    this._drawPlaying(ctx);
+    const a = this.lcAlpha;
+    if (a < 0.01) return;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.fillStyle = 'rgba(0,0,0,0.74)'; ctx.fillRect(0, 0, GW, GH);
+    ctx.textAlign = 'center';
+    ctx.shadowColor = '#FFD700'; ctx.shadowBlur = 55;
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 96px Unutterable, "Courier New", monospace';
+    ctx.fillText('LEVEL ' + this.lcLevel + ' COMPLETE!', GW/2, GH/2 - 28);
+    ctx.shadowBlur = 0; ctx.fillStyle = '#fff';
+    ctx.font = 'bold 36px Unutterable, "Courier New", monospace';
+    if (this.lcBonus > 0) ctx.fillText('🎁 TIME BONUS: +' + this.lcBonus + ' 🪙', GW/2, GH/2 + 62);
+    if (this.lcLevel < TOTAL_LEVELS) {
+      ctx.fillStyle = '#aaa'; ctx.font = '24px Unutterable, "Courier New", monospace';
+      ctx.fillText('Следующий уровень...', GW/2, GH/2 + 122);
+    }
+    ctx.restore(); ctx.textAlign = 'left'; ctx.shadowBlur = 0;
+  }
+
+  _drawWin(ctx) {
+    if (this.winLoaded) {
+      ctx.drawImage(this.winImg, 0, 0, GW, GH);
+      ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 0, GW, GH);
+    } else {
+      const g = ctx.createRadialGradient(GW/2, GH/2, 0, GW/2, GH/2, GW/2);
+      g.addColorStop(0, '#2a0812'); g.addColorStop(1, '#040108');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, GW, GH);
+      ctx.fillStyle = 'rgba(255,130,130,0.3)'; ctx.textAlign = 'center';
+      ctx.font = 'bold 20px monospace';
+      ctx.fillText('[ Поместите win.jpg в папку с игрой ]', GW/2, 120);
+      ctx.textAlign = 'left';
+    }
+
+    this.confetti.forEach(c => c.draw(ctx));
+    ctx.textAlign = 'center';
+
+    ctx.shadowColor = '#ff69b4'; ctx.shadowBlur = 60;
+    ctx.fillStyle = '#ff69b4';
+    ctx.font = 'bold 90px Unutterable, "Courier New", monospace';
+    ctx.fillText('Для Алины ❤️', GW/2, GH/2 - 130);
+
+    ctx.shadowColor = '#FFD700'; ctx.shadowBlur = 38;
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 64px Unutterable, "Courier New", monospace';
+    ctx.fillText('тЫ ЛЕГЕНДА!', GW/2, GH/2 - 34);
+
+    ctx.shadowBlur = 0; ctx.fillStyle = '#fff';
+    ctx.font = 'bold 38px Unutterable, "Courier New", monospace';
+    ctx.fillText('Монеты: ' + this.coins + ' 🪙', GW/2, GH/2 + 55);
+
+    if (this.coins >= this.bestScore && this.bestScore > 0) {
+      ctx.shadowColor = '#FFD700'; ctx.shadowBlur = 18;
+      ctx.fillStyle = '#FFD700'; ctx.font = 'bold 30px Unutterable, "Courier New", monospace';
+      ctx.fillText('🏆 НОВЫЙ РЕКОРД!', GW/2, GH/2 + 108);
+      ctx.shadowBlur = 0;
+    } else if (this.bestScore > 0) {
+      ctx.fillStyle = '#aaa'; ctx.font = '24px Unutterable, "Courier New", monospace';
+      ctx.fillText('Рекорд: ' + this.bestScore + ' 🪙', GW/2, GH/2 + 108);
+    }
+
+    // Кнопка Reset
+    const b = this.btnReset;
+    const bp = 0.97 + Math.sin(this.time * 0.003) * 0.03;
+    ctx.save();
+    ctx.translate(GW/2, b.y + b.h/2); ctx.scale(bp, bp);
+    ctx.shadowColor = '#6666ff'; ctx.shadowBlur = 18;
+    ctx.fillStyle = '#28288a';
+    ctx.beginPath(); ctx.roundRect(-b.w/2, -b.h/2, b.w, b.h, 13); ctx.fill();
+    ctx.shadowBlur = 0; ctx.fillStyle = '#fff';
+    ctx.font = 'bold 26px Unutterable, "Courier New", monospace';
+    ctx.fillText('↺  ИГРАтЬ СНОВА', 0, 10);
+    ctx.restore();
+
+    ctx.textAlign = 'left'; ctx.shadowBlur = 0;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   МАСШТАБИРОВАНИЕ — canvas всегда занимает максимум экрана, сохраняя
+   соотношение сторон 16:9 (1920×1080)
+   ═══════════════════════════════════════════════════════════════════════ */
+function fitCanvas() {
+  const c  = document.getElementById('gameCanvas');
+  const wr = window.innerWidth  / window.innerHeight;
+  const gr = GW / GH;
+  if (wr > gr) {
+    c.style.height = window.innerHeight + 'px';
+    c.style.width  = (window.innerHeight * gr) + 'px';
+  } else {
+    c.style.width  = window.innerWidth + 'px';
+    c.style.height = (window.innerWidth / gr) + 'px';
+  }
+}
+window.addEventListener('resize', fitCanvas);
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ЗАПУСК
+   ═══════════════════════════════════════════════════════════════════════ */
+window.addEventListener('DOMContentLoaded', () => {
+  document.fonts.ready.then(() => {
+    fitCanvas();
+    new Game(document.getElementById('gameCanvas'));
+  });
+});
+
+</script>
+
+<!--
+╔══════════════════════════════════════════════════════════════════════════════╗
+║              ИНСТРУКЦИИ ДЛЯ НОВИЧКОВ — КАК РАСШИРИТЬ ИГРУ                  ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                              ║
+║  1. КАК ДОБАВИТЬ НОВОЕ ОРУЖИЕ                                                ║
+║  ─────────────────────────────────────────────────────────────────────────   ║
+║  Найди класс Weapon в коде (~строка 300).                                    ║
+║  Скопируй весь класс, переименуй в, например, class Shotgun {}.              ║
+║  В конструкторе поменяй:                                                     ║
+║    this.cooldownMs = 600;  // медленнее стреляет                             ║
+║  В методе draw() перерисуй форму оружия как тебе нравится.                   ║
+║  В классе Game добавь поле: this.weapon = new Shotgun();                     ║
+║  Для переключения оружий добавь обработчик клавиши в _input():               ║
+║    if (e.key === '1') this.weapon = new Weapon();                            ║
+║    if (e.key === '2') this.weapon = new Shotgun();                           ║
+║                                                                              ║
+║  2. КАК ДОБАВИТЬ ВТОРУЮ ЛОКАЦИЮ                                              ║
+║  ─────────────────────────────────────────────────────────────────────────   ║
+║  В объекте LOCATIONS (вверху кода, ~строка 70) раскомментируй пример        ║
+║  dark_forest или добавь новый ключ по такому же шаблону:                    ║
+║    my_location: {                                                            ║
+║      bg: 'my_background.jpg',                                                ║
+║      windowSpots: [ {x:300,y:200}, ... ],                                    ║
+║      groundSpots:  [ {x:150,y:800}, ... ],                                   ║
+║      bigSpot:      { x:1500, y:650 },                                        ║
+║    }                                                                         ║
+║  Затем в Game._spawn() замени строку:                                        ║
+║    const loc = LOCATIONS.haunted_building;                                   ║
+║  На:                                                                         ║
+║    const loc = this.lm.level <= 3                                            ║
+║      ? LOCATIONS.haunted_building                                            ║
+║      : LOCATIONS.my_location;                                                ║
+║  Не забудь также сменить this.bgImg.src в конструкторе Game если нужно.     ║
+║                                                                              ║
+║  3. КАК ИЗМЕНИТЬ SPAWN RATE И СЛОЖНОСТЬ                                      ║
+║  ─────────────────────────────────────────────────────────────────────────   ║
+║  Найди массив LEVEL_CFG вверху кода (~строка 40).                            ║
+║  Каждая строка = один уровень. Параметры:                                    ║
+║    spawnMs  — время между спавнами в миллисекундах.                          ║
+║               900 = очень часто, 3200 = редко.                               ║
+║    maxOnMap — сколько монстров может быть на экране одновременно.            ║
+║    speedMult — скорость анимации монстров (1.0 = нормально, 3.0 = быстро).  ║
+║  Пример более лёгкой игры:                                                   ║
+║    { spawnMs: 4000, maxOnMap: 2, speedMult: 0.8 }                            ║
+║  Пример хаоса:                                                               ║
+║    { spawnMs: 500,  maxOnMap: 12, speedMult: 3.0 }                           ║
+║  Время уровня (60 сек) меняй в константе LEVEL_MS (~строка 30).             ║
+║                                                                              ║
+║  4. КАК НАСТРОИТЬ ЗВУКИ И ИЗОБРАЖЕНИЯ                                        ║
+║  ─────────────────────────────────────────────────────────────────────────   ║
+║  ИЗОБРАЖЕНИЯ: положи рядом с index.html:                                     ║
+║    background.jpg — фон игры (рекомендуемый размер: 1920×1080)              ║
+║    win.jpg        — фото для экрана победы (любой размер, растянется)       ║
+║                                                                              ║
+║  ЗВУКИ: создай папку sounds/ рядом с index.html, положи внутрь:             ║
+║    shot.mp3           — звук выстрела (короткий, ~0.2 сек)                  ║
+║    monster_death.mp3  — звук смерти монстра (~0.5 сек)                      ║
+║    coin.mp3           — звук монетки (~0.3 сек)                             ║
+║    horror_ambient.mp3 — атмосферный фон (длинный, будет зациклен)           ║
+║    rock_n_roll.mp3    — победный трек (будет зациклен на экране победы)     ║
+║                                                                              ║
+║  ГРОМКОСТЬ звуков регулируется в классе SoundManager (~строка 120):         ║
+║    this._make('shot', 'sounds/shot.mp3', 0.45, false);                       ║
+║    Третий параметр (0.45) = громкость от 0.0 до 1.0.                        ║
+║                                                                              ║
+║  Если браузер блокирует звук — нажми любую клавишу или кликни мышью.        ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+-->
+</body>
+</html>
