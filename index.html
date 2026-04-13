@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Holy Hunter — Для Алины ❤️</title>
 <link rel="icon" type="image/jpeg" href="images/icon-cross.jpg">
 <style>
@@ -17,6 +18,8 @@ html, body {
   overflow:hidden;
   user-select:none;
   -webkit-user-select:none;
+  touch-action:none;
+  -webkit-touch-callout:none;
 }
 #gameCanvas {
   position:absolute;
@@ -24,6 +27,7 @@ html, body {
   transform:translate(-50%,-50%);
   cursor:default;
   display:block;
+  touch-action:none;
 }
 </style>
 </head>
@@ -1017,7 +1021,7 @@ class Game {
     this.btnSkipShop = { x: GW/2-140, y: 630, w: 280, h: 54 };
     this.btnMute     = { x: GW - 76,  y: 12,  w: 56,  h: 56  };
 
-    const SW = 560, SH = 20;
+    const SW = 560, SH = 40;
     this.sliders = {
       game:  { x: GW/2 - SW/2, y: GH/2 + 160, w: SW, h: SH, val: 1.0 },
       voice: { x: GW/2 - SW/2, y: GH/2 + 260, w: SW, h: SH, val: 1.0 },
@@ -1048,6 +1052,33 @@ class Game {
     });
 
     c.addEventListener('mouseup', () => { this.draggingSlider = null; });
+
+    // Touch-поддержка — маппинг на существующую логику мыши
+    const toGame = e => {
+      const r = c.getBoundingClientRect();
+      const t = e.touches[0] || e.changedTouches[0];
+      return {
+        cx: (t.clientX - r.left) * (GW / r.width),
+        cy: (t.clientY - r.top)  * (GH / r.height),
+      };
+    };
+    c.addEventListener('touchstart', e => {
+      e.preventDefault();
+      const { cx, cy } = toGame(e);
+      this.mx = cx; this.my = cy;
+      this._mouseDown(cx, cy);
+      this._click(cx, cy);
+    }, { passive: false });
+    c.addEventListener('touchmove', e => {
+      e.preventDefault();
+      const { cx, cy } = toGame(e);
+      this.mx = cx; this.my = cy;
+      if (this.draggingSlider) this._mouseDrag(cx);
+    }, { passive: false });
+    c.addEventListener('touchend', e => {
+      e.preventDefault();
+      this.draggingSlider = null;
+    }, { passive: false });
 
     c.addEventListener('click', e => {
       const r  = c.getBoundingClientRect();
@@ -1283,7 +1314,7 @@ class Game {
   _mouseDown(cx, cy) {
     if (this.state !== 'paused') return;
     for (const [key, s] of Object.entries(this.sliders)) {
-      if (cx >= s.x && cx <= s.x + s.w && cy >= s.y - 10 && cy <= s.y + s.h + 10) {
+      if (cx >= s.x && cx <= s.x + s.w && cy >= s.y - 20 && cy <= s.y + s.h + 20) {
         this.draggingSlider = key;
         this._applySlider(key, cx);
         return;
@@ -1718,7 +1749,7 @@ class Game {
       const hx = s.x + s.w * s.val;
       ctx.shadowColor = sliderColors[key]; ctx.shadowBlur = 14;
       ctx.fillStyle = '#fff';
-      ctx.beginPath(); ctx.arc(hx, s.y + s.h / 2, 14, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(hx, s.y + s.h / 2, 20, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
     }
 
