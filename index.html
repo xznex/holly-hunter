@@ -170,79 +170,94 @@ class SoundManager {
     this.muted = false;
     this.gameMult  = 1.0;
     this.voiceMult = 1.0;
-    this._make('shot',     'sounds/shot.mp3',           0.18, false);
-    this._make('death',    'sounds/monster_death.mp3',  0.28, false);
-    this._make('coin',     'sounds/coin.mp3',           0.22, false);
-    this._make('ambient',  'sounds/horror_ambient.mp3', 0.06, true);
-    this._make('rock',     'sounds/rock_n_roll.mp3',    0.43, true);
-    this._make('thunder1', 'sounds/thunder_1.mp3', 0.30, false);
-    this._make('thunder2', 'sounds/thunder_2.mp3', 0.30, false);
-    this._make('whisper',          'sounds/demon_whisper.mp3',    0.13, false);
-    this._make('heartbreak',      'sounds/heart.mp3',            0.35, false);
-    this._make('gameover',        'sounds/game_over.mp3',        0.40, false);
-    this._make('bigLaugh',        'sounds/big_monster_laugh.mp3',0.35, false);
-    this._make('bigDeath1',       'sounds/big_monster_death_1.mp3', 0.13, false);
-    this._make('bigDeath2',       'sounds/big_monster_death_2.mp3', 0.13, false);
-    this._make('tentacleDamage',  'sounds/tentacle_damage.mp3',     0.35, false);
-    this._make('tentacleDeath1',  'sounds/tentacle_death_1.mp3',    0.13, false);
-    this._make('tentacleDeath2',  'sounds/tentacle_death_2.mp3',    0.13, false);
-    this._make('tentacleDeath3',  'sounds/tentacle_death_3.mp3',    0.13, false);
-    this._make('tentacleDeath4',  'sounds/tentacle_death_4.mp3',    0.13, false);
-    this._make('tentacleDeath5',  'sounds/tentacle_death_5.mp3',    0.13, false);
-    this._make('tentacleDeath6',  'sounds/tentacle_death_6.mp3',    0.13, false);
-    // Голос персонажа
-    this._make('voice_kill_0',  'sounds/voice/kill_0.mp3',   0.75, false, true);
-    this._make('voice_kill_1',  'sounds/voice/kill_1.mp3',   0.75, false, true);
-    this._make('voice_kill_2',  'sounds/voice/kill_2.mp3',   0.75, false, true);
-    this._make('voice_combo_0', 'sounds/voice/combo_0.mp3',  0.75, false, true);
-    this._make('voice_combo_1', 'sounds/voice/combo_1.mp3',  0.75, false, true);
-    this._make('voice_combo_2', 'sounds/voice/combo_2.mp3',  0.75, false, true);
-    this._make('voice_big_0',   'sounds/voice/big_0.mp3',    0.8,  false, true);
-    this._make('voice_big_1',   'sounds/voice/big_1.mp3',    0.8,  false, true);
-    this._make('voice_big_2',   'sounds/voice/big_2.mp3',    0.8,  false, true);
-    this._make('voice_dmg_0',   'sounds/voice/dmg_0.mp3',    0.75, false, true);
-    this._make('voice_dmg_1',   'sounds/voice/dmg_1.mp3',    0.75, false, true);
-    this._make('voice_dmg_2',   'sounds/voice/dmg_2.mp3',    0.75, false, true);
-    this._make('voice_dmg_3',   'sounds/voice/dmg_3.mp3',    0.75, false, true);
-    this._make('voice_lowhp_0', 'sounds/voice/lowhp_0.mp3',  0.8,  false, true);
-    this._make('voice_lowhp_1', 'sounds/voice/lowhp_1.mp3',  0.8,  false, true);
-    this._make('voice_lvl_0',   'sounds/voice/lvl_0.mp3',    0.75, false, true);
-    this._make('voice_lvl_1',   'sounds/voice/lvl_1.mp3',    0.75, false, true);
-    this._make('voice_shop_0',  'sounds/voice/shop_0.mp3',   0.75, false, true);
-    this._make('voice_shop_1',  'sounds/voice/shop_1.mp3',   0.75, false, true);
-    this._make('voice_win_0',   'sounds/voice/win_0.mp3',    0.8,  false, true);
-    this._make('voice_win_1',   'sounds/voice/win_1.mp3',    0.8,  false, true);
+
+    // Web Audio API — единственный способ менять громкость на iOS
+    // (HTMLAudioElement.volume read-only на iOS Safari)
+    try {
+      this._ac = new (window.AudioContext || window.webkitAudioContext)();
+      this._gameGain  = this._ac.createGain(); this._gameGain.connect(this._ac.destination);
+      this._voiceGain = this._ac.createGain(); this._voiceGain.connect(this._ac.destination);
+    } catch(_) { this._ac = null; }
+
+    // Игровые звуки (тихие, чтобы не заглушать голос)
+    this._make('shot',           'sounds/shot.mp3',              0.08, false);
+    this._make('death',          'sounds/monster_death.mp3',     0.12, false);
+    this._make('coin',           'sounds/coin.mp3',              0.10, false);
+    this._make('ambient',        'sounds/horror_ambient.mp3',    0.04, true);
+    this._make('rock',           'sounds/rock_n_roll.mp3',       0.20, true);
+    this._make('thunder1',       'sounds/thunder_1.mp3',         0.13, false);
+    this._make('thunder2',       'sounds/thunder_2.mp3',         0.13, false);
+    this._make('whisper',        'sounds/demon_whisper.mp3',     0.06, false);
+    this._make('heartbreak',     'sounds/heart.mp3',             0.15, false);
+    this._make('gameover',       'sounds/game_over.mp3',         0.18, false);
+    this._make('bigLaugh',       'sounds/big_monster_laugh.mp3', 0.15, false);
+    this._make('bigDeath1',      'sounds/big_monster_death_1.mp3', 0.06, false);
+    this._make('bigDeath2',      'sounds/big_monster_death_2.mp3', 0.06, false);
+    this._make('tentacleDamage', 'sounds/tentacle_damage.mp3',     0.15, false);
+    this._make('tentacleDeath1', 'sounds/tentacle_death_1.mp3',    0.06, false);
+    this._make('tentacleDeath2', 'sounds/tentacle_death_2.mp3',    0.06, false);
+    this._make('tentacleDeath3', 'sounds/tentacle_death_3.mp3',    0.06, false);
+    this._make('tentacleDeath4', 'sounds/tentacle_death_4.mp3',    0.06, false);
+    this._make('tentacleDeath5', 'sounds/tentacle_death_5.mp3',    0.06, false);
+    this._make('tentacleDeath6', 'sounds/tentacle_death_6.mp3',    0.06, false);
+    // Голос (максимальная громкость)
+    this._make('voice_kill_0',  'sounds/voice/kill_0.mp3',   1.0, false, true);
+    this._make('voice_kill_1',  'sounds/voice/kill_1.mp3',   1.0, false, true);
+    this._make('voice_kill_2',  'sounds/voice/kill_2.mp3',   1.0, false, true);
+    this._make('voice_combo_0', 'sounds/voice/combo_0.mp3',  1.0, false, true);
+    this._make('voice_combo_1', 'sounds/voice/combo_1.mp3',  1.0, false, true);
+    this._make('voice_combo_2', 'sounds/voice/combo_2.mp3',  1.0, false, true);
+    this._make('voice_big_0',   'sounds/voice/big_0.mp3',    1.0, false, true);
+    this._make('voice_big_1',   'sounds/voice/big_1.mp3',    1.0, false, true);
+    this._make('voice_big_2',   'sounds/voice/big_2.mp3',    1.0, false, true);
+    this._make('voice_dmg_0',   'sounds/voice/dmg_0.mp3',    1.0, false, true);
+    this._make('voice_dmg_1',   'sounds/voice/dmg_1.mp3',    1.0, false, true);
+    this._make('voice_dmg_2',   'sounds/voice/dmg_2.mp3',    1.0, false, true);
+    this._make('voice_dmg_3',   'sounds/voice/dmg_3.mp3',    1.0, false, true);
+    this._make('voice_lowhp_0', 'sounds/voice/lowhp_0.mp3',  1.0, false, true);
+    this._make('voice_lowhp_1', 'sounds/voice/lowhp_1.mp3',  1.0, false, true);
+    this._make('voice_lvl_0',   'sounds/voice/lvl_0.mp3',    1.0, false, true);
+    this._make('voice_lvl_1',   'sounds/voice/lvl_1.mp3',    1.0, false, true);
+    this._make('voice_shop_0',  'sounds/voice/shop_0.mp3',   1.0, false, true);
+    this._make('voice_shop_1',  'sounds/voice/shop_1.mp3',   1.0, false, true);
+    this._make('voice_win_0',   'sounds/voice/win_0.mp3',    1.0, false, true);
+    this._make('voice_win_1',   'sounds/voice/win_1.mp3',    1.0, false, true);
   }
 
-  setVol(name, vol) {
-    const s = this._sounds[name];
-    if (!s) return;
-    s.vol = vol;
-    try { s.audio.volume = vol; } catch(_) {}
+  // Вызывается на первом пользовательском жесте — разблокирует AudioContext на iOS
+  unlockAC() {
+    if (this._ac && this._ac.state !== 'running') this._ac.resume().catch(() => {});
   }
 
   _make(name, src, vol, loop, isVoice = false) {
     const a = new Audio();
-    a.src = src;
-    a.volume = vol;
-    a.loop = loop;
-    a.preload = 'auto';
-    a.onerror = () => {}; // Тихо игнорируем отсутствующий файл
-    this._sounds[name] = { audio: a, vol, base: vol, isVoice };
+    a.src = src; a.loop = loop; a.preload = 'auto'; a.onerror = () => {};
+    let gainNode = null;
+    if (this._ac) {
+      try {
+        const waSource = this._ac.createMediaElementSource(a);
+        gainNode = this._ac.createGain();
+        gainNode.gain.value = vol;
+        waSource.connect(gainNode);
+        gainNode.connect(isVoice ? this._voiceGain : this._gameGain);
+      } catch(_) { gainNode = null; }
+    } else {
+      a.volume = vol;
+    }
+    this._sounds[name] = { audio: a, base: vol, isVoice, gainNode };
   }
 
+  // Слайдеры громкости — меняют групповой GainNode (работает на iOS)
   setGameMult(m) {
     this.gameMult = m;
-    Object.values(this._sounds).forEach(s => {
-      if (!s.isVoice) try { s.audio.volume = s.base * m; } catch(_) {}
-    });
+    if (this._ac) { this._gameGain.gain.value = m; }
+    else { Object.values(this._sounds).forEach(s => { if (!s.isVoice) try { s.audio.volume = s.base * m; } catch(_) {} }); }
   }
 
   setVoiceMult(m) {
     this.voiceMult = m;
-    Object.values(this._sounds).forEach(s => {
-      if (s.isVoice) try { s.audio.volume = s.base * m; } catch(_) {}
-    });
+    if (this._ac) { this._voiceGain.gain.value = m; }
+    else { Object.values(this._sounds).forEach(s => { if (s.isVoice) try { s.audio.volume = s.base * m; } catch(_) {} }); }
   }
 
   toggleMute() {
@@ -250,14 +265,23 @@ class SoundManager {
     if (this.muted) this.stopAll();
   }
 
-  // Одиночный звук (полифония — создаём клон, трекаем для stopAll)
+  // Одиночный звук (полифония через клон + отдельный gainNode)
   play(name) {
     if (this.muted) return;
     const s = this._sounds[name];
     if (!s) return;
+    this.unlockAC();
     try {
       const clone = s.audio.cloneNode();
-      clone.volume = s.base * (s.isVoice ? this.voiceMult : this.gameMult);
+      if (this._ac) {
+        const cloneSrc  = this._ac.createMediaElementSource(clone);
+        const cloneGain = this._ac.createGain();
+        cloneGain.gain.value = s.base;
+        cloneSrc.connect(cloneGain);
+        cloneGain.connect(s.isVoice ? this._voiceGain : this._gameGain);
+      } else {
+        clone.volume = s.base * (s.isVoice ? this.voiceMult : this.gameMult);
+      }
       if (!s.clones) s.clones = [];
       s.clones.push(clone);
       clone.addEventListener('ended', () => { s.clones = s.clones.filter(c => c !== clone); });
@@ -265,11 +289,12 @@ class SoundManager {
     } catch(_) {}
   }
 
-  // Зациклённый звук
+  // Зациклённый звук (базовый элемент уже подключён к графу в _make)
   loop(name) {
     if (this.muted) return;
     const s = this._sounds[name];
     if (!s) return;
+    this.unlockAC();
     try { s.audio.currentTime = 0; s.audio.play().catch(() => {}); } catch(_) {}
   }
 
@@ -1127,13 +1152,16 @@ class Game {
       }
     });
 
-    // Разблокировка Audio (нужно взаимодействие пользователя)
+    // Разблокировка Audio + Web Audio Context (нужно взаимодействие пользователя)
     const unlock = () => {
+      this.snd.unlockAC();
       this.snd.loop('ambient');
       document.removeEventListener('click', unlock);
+      document.removeEventListener('touchstart', unlock);
       document.removeEventListener('keydown', unlock);
     };
     document.addEventListener('click', unlock);
+    document.addEventListener('touchstart', unlock, { once: true });
     document.addEventListener('keydown', unlock);
   }
 
@@ -1920,11 +1948,11 @@ class Game {
 
   _drawHearts(ctx) {
     ctx.save();
-    ctx.font = '26px Arial';
+    ctx.font = '39px Arial';
     ctx.textAlign = 'left';
     for (let i = 0; i < this.playerMaxHp; i++) {
       const alive = i < this.playerHp;
-      const x = 18 + i * 34, y = 50;
+      const x = 18 + i * 50, y = 58;
       ctx.globalAlpha = alive ? 1 : 0.28;
       // Чёрная обводка
       ctx.shadowColor = '#000';
@@ -1934,7 +1962,7 @@ class Game {
       ctx.strokeText(alive ? '❤️' : '🖤', x, y);
       // Само сердце с красным свечением
       ctx.shadowColor = alive ? '#ff0044' : 'transparent';
-      ctx.shadowBlur  = alive ? 8 : 0;
+      ctx.shadowBlur  = alive ? 10 : 0;
       ctx.fillText(alive ? '❤️' : '🖤', x, y);
     }
     ctx.restore();
