@@ -3,8 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="description" content="Holy Hunter — бесплатная браузерная игра-шутер. Уничтожай монстров, собирай монеты, прокачивай персонажа. 5 уровней, 3 вида врагов.">
+<meta name="keywords" content="игра, шутер, браузерная игра, holy hunter, canvas game">
+<meta name="author" content="xznex">
+<!-- PWA / iOS fullscreen -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-fullscreen">
+<meta name="apple-mobile-web-app-title" content="Holy Hunter">
 <title>Holy Hunter — Для Алины ❤️</title>
 <link rel="icon" type="image/jpeg" href="images/icon-cross.jpg">
+<link rel="apple-touch-icon" href="images/icon-cross.jpg">
 <style>
 @font-face {
   font-family: 'Unutterable';
@@ -871,7 +879,7 @@ class UI {
     ctx.textAlign = 'center';
     const active = g.comboMult > 1;
     ctx.fillStyle = active ? '#ff6600' : '#ffbb00';
-    ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 14;
+    if (!g.isMobile) { ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 14; }
     ctx.font = 'bold 30px Unutterable, "Courier New", monospace';
     ctx.fillText('COMBO x' + g.combo, 0, -6);
 
@@ -884,18 +892,17 @@ class UI {
     ctx.textAlign = 'left'; ctx.shadowBlur = 0;
   }
 
-  drawFloats(ctx) {
+  drawFloats(ctx, isMobile = false) {
     ctx.textAlign = 'center';
     this.floats.forEach(f => {
-      ctx.save();
       ctx.globalAlpha = Math.max(0, f.life);
       ctx.fillStyle = f.color;
       ctx.font = `bold ${f.size}px Unutterable, "Courier New", monospace`;
-      ctx.shadowColor = f.color; ctx.shadowBlur = 10;
+      if (!isMobile) { ctx.shadowColor = f.color; ctx.shadowBlur = 10; }
       ctx.fillText(f.text, f.x, f.y);
-      ctx.restore();
     });
-    ctx.textAlign = 'left'; ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+    ctx.textAlign = 'left';
   }
 }
 
@@ -1032,6 +1039,8 @@ class Game {
     this.btnMute     = { x: GW - 76,  y: 12,  w: 56,  h: 56  };
     this.btnPause    = { x: GW - 76,  y: 12,  w: 56,  h: 56  };
     this.isMobile    = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+    this.isIOS       = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    this.isStandalone = !!window.navigator.standalone;
 
     const SW = 560, SH = 40;
     this.sliders = {
@@ -1039,7 +1048,7 @@ class Game {
       voice: { x: GW/2 - SW/2, y: GH/2 + 260, w: SW, h: SH, val: 1.0 },
     };
     this.draggingSlider = null;
-    this.btnFullscreen  = { x: GW/2 - 160, y: GH/2 + 340, w: 320, h: 60 };
+    this.btnFullscreen  = { x: GW/2 - 180, y: GH/2 + 165, w: 360, h: 60 };
 
     this._input();
     this._setState('menu'); // установить начальный курсор
@@ -1143,11 +1152,11 @@ class Game {
 
     if (this.state === 'menu') {
       if (hit(this.btnStart)) this._startGame();
+      if (this.isMobile && !this.isIOS && hit(this.btnFullscreen)) this._fullscreen();
     } else if (this.state === 'playing') {
       this._shoot(x, y);
     } else if (this.state === 'paused') {
       if (hit(this.btnResume)) this._resume();
-      if (this.isMobile && hit(this.btnFullscreen)) this._fullscreen();
     } else if (this.state === 'gameover') {
       if (hit(this.btnGameOver)) this._goMenu();
     } else if (this.state === 'shop') {
@@ -1553,6 +1562,7 @@ class Game {
     this.monsters = this.monsters.filter(m => !m.gone);
     this.particles.forEach(p => p.update());
     this.particles = this.particles.filter(p => p.alive);
+    if (this.isMobile && this.particles.length > 60) this.particles.splice(0, this.particles.length - 60);
 
     // Поле очищено — переходим к следующему уровню
     if (this.levelClearing && this.monsters.length === 0) {
@@ -1728,9 +1738,33 @@ class Game {
     ctx.fillText('▶  НАЧАтЬ ИГРУ', 0, 11);
     ctx.restore();
 
+    // Кнопка полного экрана (Android) или подсказка "добавить на главный экран" (iOS)
+    if (this.isMobile) {
+      if (this.isIOS && !this.isStandalone) {
+        ctx.fillStyle = 'rgba(150,150,180,0.85)';
+        ctx.font = '20px Unutterable, "Courier New", monospace';
+        ctx.fillText('📱 Нажмите  □↑  и "На экран Домой" для полного экрана', GW/2, GH/2 + 198);
+      } else if (!this.isIOS) {
+        const fb = this.btnFullscreen;
+        const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+        ctx.save();
+        ctx.fillStyle = 'rgba(20,20,40,0.85)';
+        ctx.strokeStyle = '#5555cc'; ctx.lineWidth = 2;
+        ctx.shadowColor = '#5555cc'; ctx.shadowBlur = 10;
+        ctx.beginPath(); ctx.roundRect(fb.x, fb.y, fb.w, fb.h, 12); ctx.fill(); ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.font = 'bold 22px Unutterable, "Courier New", monospace';
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(isFs ? '✕  ВЫЙТИ ИЗ ПОЛНОГО ЭКРАНА' : '⛶  ПОЛНЫЙ ЭКРАН', fb.x + fb.w/2, fb.y + fb.h/2);
+        ctx.textBaseline = 'alphabetic';
+        ctx.restore();
+      }
+    }
+
     ctx.fillStyle = 'rgba(110,110,110,0.7)';
     ctx.font = '18px Unutterable, "Courier New", monospace';
-    ctx.fillText('ЛКМ — стрелять   |   F — полный экран   |   Esc — пауза', GW/2, GH - 34);
+    ctx.fillText(this.isMobile ? 'тап — стрелять   |   Esc — пауза' : 'ЛКМ — стрелять   |   F — полный экран   |   Esc — пауза', GW/2, GH - 34);
 
     ctx.textAlign = 'left'; ctx.shadowBlur = 0;
   }
@@ -1791,24 +1825,6 @@ class Game {
       ctx.shadowColor = sliderColors[key]; ctx.shadowBlur = 14;
       ctx.fillStyle = '#fff';
       ctx.beginPath(); ctx.arc(hx, s.y + s.h / 2, 20, 0, Math.PI * 2); ctx.fill();
-      ctx.restore();
-    }
-
-    // Кнопка полного экрана — только на мобиле
-    if (this.isMobile) {
-      const fb = this.btnFullscreen;
-      const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
-      ctx.save();
-      ctx.fillStyle = 'rgba(20,20,40,0.85)';
-      ctx.strokeStyle = '#5555cc'; ctx.lineWidth = 2;
-      ctx.shadowColor = '#5555cc'; ctx.shadowBlur = 10;
-      ctx.beginPath(); ctx.roundRect(fb.x, fb.y, fb.w, fb.h, 12); ctx.fill(); ctx.stroke();
-      ctx.shadowBlur = 0;
-      ctx.font = 'bold 22px Unutterable, "Courier New", monospace';
-      ctx.fillStyle = '#fff';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(isFs ? '✕  ВЫЙТИ ИЗ ПОЛНОГО ЭКРАНА' : '⛶  ПОЛНЫЙ ЭКРАН', fb.x + fb.w/2, fb.y + fb.h/2);
-      ctx.textBaseline = 'alphabetic';
       ctx.restore();
     }
 
@@ -1882,7 +1898,7 @@ class Game {
     }
     this.weapon.draw(ctx, this.isMobile);
     this.ui.drawHUD(ctx, this);
-    this.ui.drawFloats(ctx);
+    this.ui.drawFloats(ctx, this.isMobile);
     this._drawHearts(ctx);
   }
 
