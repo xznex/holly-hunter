@@ -6,6 +6,11 @@
 <meta name="description" content="Holy Hunter — бесплатная браузерная игра-шутер. Уничтожай монстров, собирай монеты, прокачивай персонажа. 5 уровней, 3 вида врагов.">
 <meta name="keywords" content="игра, шутер, браузерная игра, holy hunter, canvas game">
 <meta name="author" content="xznex">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Holy Hunter — браузерная игра-шутер">
+<meta property="og:description" content="Бесплатная браузерная игра. Уничтожай монстров, собирай монеты!">
+<meta property="og:url" content="https://xznex.github.io/holly-hunter/">
+<meta property="og:image" content="https://xznex.github.io/holly-hunter/images/icon-cross.jpg">
 <!-- PWA / iOS fullscreen -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-fullscreen">
@@ -1037,15 +1042,19 @@ class Game {
     ];
     this.btnSkipShop = { x: GW/2-140, y: 630, w: 280, h: 54 };
     this.btnMute     = { x: GW - 76,  y: 12,  w: 56,  h: 56  };
-    this.btnPause    = { x: GW - 76,  y: 12,  w: 56,  h: 56  };
     this.isMobile    = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
     this.isIOS       = /iPad|iPhone|iPod/.test(navigator.userAgent);
     this.isStandalone = !!window.navigator.standalone;
+    this.btnPause    = this.isMobile
+      ? { x: GW - 184, y: 10, w: 166, h: 84 }
+      : { x: GW - 76,  y: 12, w: 56,  h: 56 };
 
-    const SW = 560, SH = 40;
+    const SW = this.isMobile ? 760 : 560;
+    const SH = this.isMobile ? 64  : 40;
+    const SR = this.isMobile ? 30  : 20;
     this.sliders = {
-      game:  { x: GW/2 - SW/2, y: GH/2 + 160, w: SW, h: SH, val: 1.0 },
-      voice: { x: GW/2 - SW/2, y: GH/2 + 260, w: SW, h: SH, val: 1.0 },
+      game:  { x: GW/2 - SW/2, y: GH/2 + 155, w: SW, h: SH, val: 1.0, r: SR },
+      voice: { x: GW/2 - SW/2, y: GH/2 + 265, w: SW, h: SH, val: 1.0, r: SR },
     };
     this.draggingSlider = null;
     this.btnFullscreen  = { x: GW/2 - 180, y: GH/2 + 165, w: 360, h: 60 };
@@ -1088,8 +1097,8 @@ class Game {
       e.preventDefault();
       const { cx, cy } = toGame(e);
       this.mx = cx; this.my = cy;
-      this._mouseDown(cx, cy);
-      this._click(cx, cy);
+      const sliderHit = this._mouseDown(cx, cy);
+      if (!sliderHit) this._click(cx, cy);
     }, { passive: false });
     c.addEventListener('touchmove', e => {
       e.preventDefault();
@@ -1347,14 +1356,16 @@ class Game {
   }
 
   _mouseDown(cx, cy) {
-    if (this.state !== 'paused') return;
+    if (this.state !== 'paused') return false;
+    const pad = this.isMobile ? 44 : 20;
     for (const [key, s] of Object.entries(this.sliders)) {
-      if (cx >= s.x && cx <= s.x + s.w && cy >= s.y - 20 && cy <= s.y + s.h + 20) {
+      if (cx >= s.x && cx <= s.x + s.w && cy >= s.y - pad && cy <= s.y + s.h + pad) {
         this.draggingSlider = key;
         this._applySlider(key, cx);
-        return;
+        return true;
       }
     }
+    return false;
   }
 
   _mouseDrag(cx) {
@@ -1621,15 +1632,19 @@ class Game {
     if (this.isMobile) {
       if (this.state === 'playing' || this.state === 'paused') {
         const pb = this.btnPause;
+        const isP = this.state === 'paused';
         ctx.save();
-        ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.beginPath(); ctx.roundRect(pb.x, pb.y, pb.w, pb.h, 10); ctx.fill();
-        ctx.font = '28px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(this.state === 'paused' ? '▶' : '⏸', pb.x + pb.w / 2, pb.y + pb.h / 2);
-        ctx.textBaseline = 'alphabetic';
-        ctx.restore();
+        ctx.shadowColor = isP ? '#22cc44' : '#cc2222'; ctx.shadowBlur = 16;
+        ctx.fillStyle   = isP ? 'rgba(0,22,0,0.88)' : 'rgba(22,0,0,0.88)';
+        ctx.beginPath(); ctx.roundRect(pb.x, pb.y, pb.w, pb.h, 14); ctx.fill();
+        ctx.strokeStyle = isP ? '#44ff88' : '#ff3333'; ctx.lineWidth = 2;
+        ctx.shadowBlur  = 0;
+        ctx.beginPath(); ctx.roundRect(pb.x, pb.y, pb.w, pb.h, 14); ctx.stroke();
+        ctx.font = 'bold 30px Unutterable, "Courier New", monospace';
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(isP ? '\u25ba  \u0418\u0413\u0420\u0410\u0442\u042c' : '|| \u041f\u0410\u0423\u0417\u0430', pb.x + pb.w / 2, pb.y + pb.h / 2);
+        ctx.textBaseline = 'alphabetic'; ctx.restore();
       }
     } else {
       const mb = this.btnMute;
@@ -1715,7 +1730,7 @@ class Game {
     ctx.fillText('Для Алины ❤️', GW/2, GH/2 - 92);
 
     ctx.fillStyle = 'rgba(165,165,165,0.8)';
-    ctx.font = '22px Unutterable, "Courier New", monospace';
+    ctx.font = `${this.isMobile ? 34 : 22}px Unutterable, "Courier New", monospace`;
     ctx.fillText('5 уровней  ·  3 вида монстров  ·  Собирай монеты!', GW/2, GH/2 - 35);
 
     if (this.bestScore > 0) {
@@ -1742,7 +1757,7 @@ class Game {
     if (this.isMobile) {
       if (this.isIOS && !this.isStandalone) {
         ctx.fillStyle = 'rgba(150,150,180,0.85)';
-        ctx.font = '20px Unutterable, "Courier New", monospace';
+        ctx.font = '30px Unutterable, "Courier New", monospace';
         ctx.fillText('📱 Нажмите  □↑  и "На экран Домой" для полного экрана', GW/2, GH/2 + 198);
       } else if (!this.isIOS) {
         const fb = this.btnFullscreen;
@@ -1763,7 +1778,7 @@ class Game {
     }
 
     ctx.fillStyle = 'rgba(110,110,110,0.7)';
-    ctx.font = '18px Unutterable, "Courier New", monospace';
+    ctx.font = `${this.isMobile ? 30 : 18}px Unutterable, "Courier New", monospace`;
     ctx.fillText(this.isMobile ? 'тап — стрелять   |   Esc — пауза' : 'ЛКМ — стрелять   |   F — полный экран   |   Esc — пауза', GW/2, GH - 34);
 
     ctx.textAlign = 'left'; ctx.shadowBlur = 0;
@@ -1795,22 +1810,23 @@ class Game {
     ctx.restore();
 
     ctx.fillStyle = 'rgba(110,110,110,0.7)';
-    ctx.font = '18px Unutterable, "Courier New", monospace';
+    ctx.font = `${this.isMobile ? 30 : 18}px Unutterable, "Courier New", monospace`;
     ctx.fillText('Esc — продолжить', GW/2, GH - 34);
 
     // Слайдеры громкости
     const sliderLabels  = { game: '🔊  ИГРОВЫЕ ЗВУКИ', voice: '🎤  ГОЛОС АЛИНЫ' };
     const sliderColors  = { game: '#55aaff',            voice: '#ff88cc'            };
+    const sliderFontSz  = this.isMobile ? 36 : 22;
     for (const [key, s] of Object.entries(this.sliders)) {
       ctx.save();
       ctx.shadowBlur = 0;
-      ctx.font = 'bold 22px Unutterable, "Courier New", monospace';
+      ctx.font = `bold ${sliderFontSz}px Unutterable, "Courier New", monospace`;
       ctx.fillStyle = sliderColors[key];
       ctx.textAlign = 'left';
-      ctx.fillText(sliderLabels[key], s.x, s.y - 12);
+      ctx.fillText(sliderLabels[key], s.x, s.y - 14);
       ctx.fillStyle = '#fff';
       ctx.textAlign = 'right';
-      ctx.fillText(Math.round(s.val * 100) + '%', s.x + s.w, s.y - 12);
+      ctx.fillText(Math.round(s.val * 100) + '%', s.x + s.w, s.y - 14);
       // Трек
       ctx.fillStyle = 'rgba(255,255,255,0.12)';
       ctx.beginPath(); ctx.roundRect(s.x, s.y, s.w, s.h, s.h / 2); ctx.fill();
@@ -1824,7 +1840,7 @@ class Game {
       const hx = s.x + s.w * s.val;
       ctx.shadowColor = sliderColors[key]; ctx.shadowBlur = 14;
       ctx.fillStyle = '#fff';
-      ctx.beginPath(); ctx.arc(hx, s.y + s.h / 2, 20, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(hx, s.y + s.h / 2, s.r, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
     }
 
@@ -2030,7 +2046,7 @@ class Game {
     ctx.font = 'bold 36px Unutterable, "Courier New", monospace';
     if (this.lcBonus > 0) ctx.fillText('🎁 TIME BONUS: +' + this.lcBonus + ' 🪙', GW/2, GH/2 + 62);
     if (this.lcLevel < TOTAL_LEVELS) {
-      ctx.fillStyle = '#aaa'; ctx.font = '24px Unutterable, "Courier New", monospace';
+      ctx.fillStyle = '#aaa'; ctx.font = `${this.isMobile ? 36 : 24}px Unutterable, "Courier New", monospace`;
       ctx.fillText('Следующий уровень...', GW/2, GH/2 + 122);
     }
     ctx.restore(); ctx.textAlign = 'left'; ctx.shadowBlur = 0;
@@ -2069,11 +2085,11 @@ class Game {
 
     if (this.coins >= this.bestScore && this.bestScore > 0) {
       ctx.shadowColor = '#FFD700'; ctx.shadowBlur = 18;
-      ctx.fillStyle = '#FFD700'; ctx.font = 'bold 30px Unutterable, "Courier New", monospace';
+      ctx.fillStyle = '#FFD700'; ctx.font = `bold ${this.isMobile ? 38 : 30}px Unutterable, "Courier New", monospace`;
       ctx.fillText('🏆 НОВЫЙ РЕКОРД!', GW/2, GH/2 + 108);
       ctx.shadowBlur = 0;
     } else if (this.bestScore > 0) {
-      ctx.fillStyle = '#aaa'; ctx.font = '24px Unutterable, "Courier New", monospace';
+      ctx.fillStyle = '#aaa'; ctx.font = `${this.isMobile ? 34 : 24}px Unutterable, "Courier New", monospace`;
       ctx.fillText('Рекорд: ' + this.bestScore + ' 🪙', GW/2, GH/2 + 108);
     }
 
