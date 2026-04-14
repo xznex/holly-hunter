@@ -339,36 +339,44 @@ class Particle {
   draw(ctx) {
     if (!this.alive || this.life <= 0) return;
     const a = Math.max(0, this.life);
-    ctx.save();
-    ctx.globalAlpha = a;
 
     if (this.type === 'blood' || this.type === 'slime') {
+      // Без save/restore — только меняем globalAlpha и восстанавливаем вручную
+      ctx.globalAlpha = a;
       ctx.fillStyle = `hsl(${this.hue}, 85%, 32%)`;
       ctx.beginPath();
       ctx.arc(this.x, this.y, Math.max(0.5, this.r * this.life), 0, Math.PI * 2);
       ctx.fill();
+      ctx.globalAlpha = 1;
     } else if (this.type === 'muzzle') {
-      ctx.fillStyle = `rgba(255, ${(180 + this.life * 75) | 0}, 40, ${a})`;
-      ctx.shadowColor = '#ffaa00';
-      ctx.shadowBlur = 8;
+      // Без shadowBlur — два круга вместо свечения (быстро на iOS)
+      ctx.globalAlpha = a;
+      ctx.fillStyle = `rgba(255,200,60,0.35)`;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, Math.max(0.5, this.r * 2.2), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgba(255, ${(200 + this.life * 55) | 0}, 80, ${a})`;
       ctx.beginPath();
       ctx.arc(this.x, this.y, Math.max(0.5, this.r), 0, Math.PI * 2);
       ctx.fill();
+      ctx.globalAlpha = 1;
     } else if (this.type === 'confetti') {
+      ctx.save();
+      ctx.globalAlpha = a;
       ctx.translate(this.x, this.y);
       ctx.rotate(this.ang);
       ctx.fillStyle = `hsl(${this.hue}, 100%, 60%)`;
       ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
+      ctx.restore();
     } else if (this.type === 'spark') {
-      ctx.fillStyle = '#FFD700';
-      ctx.shadowColor = '#FFD700';
-      ctx.shadowBlur = 8;
+      // Без shadowBlur — яркий жёлтый без blur (быстро на iOS)
+      ctx.globalAlpha = a;
+      ctx.fillStyle = `rgba(255,${(160 + this.life * 95) | 0},0,1)`;
       ctx.beginPath();
       ctx.arc(this.x, this.y, Math.max(0.5, this.r * this.life), 0, Math.PI * 2);
       ctx.fill();
+      ctx.globalAlpha = 1;
     }
-
-    ctx.restore();
   }
 }
 
@@ -664,7 +672,7 @@ class Weapon {
     return true;
   }
 
-  draw(ctx) {
+  draw(ctx, isMobile = false) {
     // Корпус пистолета: смещён от прицела вниз-вправо + отдача
     const offX = 58;
     const offY = 42 + this.recoil * 0.38;
@@ -672,8 +680,10 @@ class Weapon {
     const gy   = this.y + offY;
 
     ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.55)';
-    ctx.shadowBlur  = 14;
+    if (!isMobile) {
+      ctx.shadowColor = 'rgba(0,0,0,0.55)';
+      ctx.shadowBlur  = 14;
+    }
 
     // Рукоять
     ctx.fillStyle = '#150c04';
@@ -895,7 +905,7 @@ class UI {
 class Game {
   constructor(canvas) {
     this.canvas = canvas;
-    this.ctx    = canvas.getContext('2d');
+    this.ctx    = canvas.getContext('2d', { alpha: false });
 
     this.bgScaleX = 1920 / 1376;   // ≈ 1.395
     this.bgScaleY = 1080 / 768;    // ≈ 1.406
@@ -1029,6 +1039,7 @@ class Game {
       voice: { x: GW/2 - SW/2, y: GH/2 + 260, w: SW, h: SH, val: 1.0 },
     };
     this.draggingSlider = null;
+    this.btnFullscreen  = { x: GW/2 - 160, y: GH/2 + 340, w: 320, h: 60 };
 
     this._input();
     this._setState('menu'); // установить начальный курсор
@@ -1109,8 +1120,12 @@ class Game {
   }
 
   _fullscreen() {
-    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{});
-    else document.exitFullscreen().catch(()=>{});
+    const el     = document.documentElement;
+    const enter  = el.requestFullscreen     || el.webkitRequestFullscreen;
+    const exit   = document.exitFullscreen  || document.webkitExitFullscreen;
+    const isFull = document.fullscreenElement || document.webkitFullscreenElement;
+    if (!isFull) { if (enter) enter.call(el).catch(() => {}); }
+    else         { if (exit)  exit.call(document).catch(() => {}); }
   }
 
   _click(x, y) {
@@ -1132,6 +1147,7 @@ class Game {
       this._shoot(x, y);
     } else if (this.state === 'paused') {
       if (hit(this.btnResume)) this._resume();
+      if (this.isMobile && hit(this.btnFullscreen)) this._fullscreen();
     } else if (this.state === 'gameover') {
       if (hit(this.btnGameOver)) this._goMenu();
     } else if (this.state === 'shop') {
@@ -1778,6 +1794,24 @@ class Game {
       ctx.restore();
     }
 
+    // Кнопка полного экрана — только на мобиле
+    if (this.isMobile) {
+      const fb = this.btnFullscreen;
+      const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      ctx.save();
+      ctx.fillStyle = 'rgba(20,20,40,0.85)';
+      ctx.strokeStyle = '#5555cc'; ctx.lineWidth = 2;
+      ctx.shadowColor = '#5555cc'; ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.roundRect(fb.x, fb.y, fb.w, fb.h, 12); ctx.fill(); ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.font = 'bold 22px Unutterable, "Courier New", monospace';
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(isFs ? '✕  ВЫЙТИ ИЗ ПОЛНОГО ЭКРАНА' : '⛶  ПОЛНЫЙ ЭКРАН', fb.x + fb.w/2, fb.y + fb.h/2);
+      ctx.textBaseline = 'alphabetic';
+      ctx.restore();
+    }
+
     ctx.textAlign = 'left'; ctx.shadowBlur = 0;
   }
 
@@ -1832,17 +1866,21 @@ class Game {
       ctx.stroke();
       ctx.restore();
     }
-    // Красная виньетка при уроне
+    // Красная виньетка при уроне — градиент кэшируется при первом вызове
     if (this.damageVignette > 0) {
+      if (!this._vignetteGrad) {
+        const vg = ctx.createRadialGradient(GW/2, GH/2, GH*0.25, GW/2, GH/2, GH*0.85);
+        vg.addColorStop(0, 'rgba(180,0,0,0)');
+        vg.addColorStop(1, 'rgba(200,0,0,0.65)');
+        this._vignetteGrad = vg;
+      }
       ctx.save();
-      const vg = ctx.createRadialGradient(GW/2, GH/2, GH*0.25, GW/2, GH/2, GH*0.85);
-      vg.addColorStop(0, 'rgba(180,0,0,0)');
-      vg.addColorStop(1, `rgba(200,0,0,${this.damageVignette * 0.65})`);
-      ctx.fillStyle = vg;
+      ctx.globalAlpha = this.damageVignette;
+      ctx.fillStyle = this._vignetteGrad;
       ctx.fillRect(0, 0, GW, GH);
       ctx.restore();
     }
-    this.weapon.draw(ctx);
+    this.weapon.draw(ctx, this.isMobile);
     this.ui.drawHUD(ctx, this);
     this.ui.drawFloats(ctx);
     this._drawHearts(ctx);
