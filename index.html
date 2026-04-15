@@ -222,11 +222,26 @@ class SoundManager {
     this._make('voice_shop_1',  'sounds/voice/shop_1.mp3',   1.0, false, true);
     this._make('voice_win_0',   'sounds/voice/win_0.mp3',    1.0, false, true);
     this._make('voice_win_1',   'sounds/voice/win_1.mp3',    1.0, false, true);
+    this._buffers = {};
+    if (this._ac) this._prefetchBuffers(['shot', 'coin', 'death']);
   }
 
   // Вызывается на первом пользовательском жесте — разблокирует AudioContext на iOS
   unlockAC() {
     if (this._ac && this._ac.state !== 'running') this._ac.resume().catch(() => {});
+  }
+
+  // Предзагрузка коротких звуков в AudioBuffer для нулевой задержки на iOS
+  _prefetchBuffers(names) {
+    if (!this._ac) return;
+    names.forEach(name => {
+      const s = this._sounds[name];
+      if (!s) return;
+      fetch(s.audio.src).then(r => r.arrayBuffer())
+        .then(buf => this._ac.decodeAudioData(buf))
+        .then(decoded => { this._buffers[name] = decoded; })
+        .catch(() => {});
+    });
   }
 
   _make(name, src, vol, loop, isVoice = false) {
@@ -271,6 +286,17 @@ class SoundManager {
     const s = this._sounds[name];
     if (!s) return;
     this.unlockAC();
+    // Нулевая задержка через предзагруженный AudioBuffer (фикс iOS latency)
+    if (this._ac && this._ac.state === 'running' && this._buffers[name]) {
+      const src = this._ac.createBufferSource();
+      src.buffer = this._buffers[name];
+      const gain = this._ac.createGain();
+      gain.gain.value = s.base;
+      src.connect(gain);
+      gain.connect(s.isVoice ? this._voiceGain : this._gameGain);
+      src.start();
+      return;
+    }
     try {
       const clone = s.audio.cloneNode();
       if (this._ac) {
@@ -643,7 +669,7 @@ class Monster {
       ctx.restore();
     }
 
-    if (this.type === 'bigMonster' && this.maxHp > 1 && vis > 0.2) this._drawHpBar(ctx, vis);
+    if (this.maxHp > 1 && vis > 0.2 && (this.type === 'bigMonster' || (this.type === 'tentacle' && this.hp < this.maxHp))) this._drawHpBar(ctx, vis);
   }
 
   _drawHpBar(ctx, vis) {
@@ -1534,7 +1560,8 @@ class Game {
     if (this.lm.level >= 3) {
       // Дождь: инициализация капель
       if (this.rainDrops.length === 0) {
-        for (let i = 0; i < 220; i++) {
+        const rainCount = this.isMobile ? 80 : 220;
+        for (let i = 0; i < rainCount; i++) {
           this.rainDrops.push({ x: rnd(0, GW), y: rnd(0, GH), spd: rnd(14, 22), len: rnd(12, 26) });
         }
       }
