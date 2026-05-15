@@ -64,9 +64,10 @@ body { position:fixed; inset:0; height:var(--app-height, 100dvh); }
 // ── Размер игрового поля (не меняй, это внутренние координаты) ──────────
 const GW = 1920;
 const GH = 1080;
-const TARGET_FPS_MOBILE = 45;
+const TARGET_FPS_MOBILE = 60;
 const MOBILE_RENDER_SCALE = 0.72;
 const MOBILE_RENDER_SCALE_LOW = 0.62;
+const MOBILE_RENDER_SCALE_LATE = 0.56;
 const RAIN_COUNT_DESKTOP = 160;
 const RAIN_COUNT_MOBILE = 28;
 
@@ -101,6 +102,14 @@ const LEVEL_CFG = [
   { spawnMs: 1200, maxOnMap: 6, speedMult: 1.5  }, // Уровень 3
   { spawnMs:  950, maxOnMap: 6, speedMult: 1.75 }, // Уровень 4
   { spawnMs:  950, maxOnMap: 7, speedMult: 1.9  }, // Уровень 5 — финал
+];
+
+const MOBILE_LEVEL_CFG = [
+  { spawnMs: 1800, maxOnMap: 4, speedMult: 1.0  },
+  { spawnMs: 1550, maxOnMap: 4, speedMult: 1.20 },
+  { spawnMs: 1350, maxOnMap: 4, speedMult: 1.35 },
+  { spawnMs: 1200, maxOnMap: 4, speedMult: 1.50 },
+  { spawnMs: 1150, maxOnMap: 4, speedMult: 1.60 },
 ];
 
 /* ── PNG-спрайты для tentacle и bigMonster ──────────────────────────────
@@ -848,13 +857,15 @@ class LevelManager {
     this.timeLeft   = LEVEL_MS;
     this.spawnTimer = 1200;
     this.active     = false;
+    this.cfgOverride = null;
   }
 
-  get cfg()     { return LEVEL_CFG[this.level - 1]; }
+  get cfg()     { return this.cfgOverride || LEVEL_CFG[this.level - 1]; }
   get secLeft() { return Math.ceil(this.timeLeft / 1000); }
 
-  start(lvl) {
+  start(lvl, cfgOverride = null) {
     this.level      = lvl;
+    this.cfgOverride = cfgOverride;
     this.timeLeft   = LEVEL_MS;
     this.spawnTimer = 1200;
     this.active     = true;
@@ -1115,7 +1126,7 @@ class Game {
     this.isIOS       = /iPad|iPhone|iPod/.test(navigator.userAgent);
     this.isStandalone = !!window.navigator.standalone;
     this.lowPowerMode = this.isMobile && ((navigator.deviceMemory && navigator.deviceMemory <= 4) || this.isIOS);
-    this.weatherFxEnabled = !this.lowPowerMode;
+    this.weatherFxEnabled = !this.isMobile;
     this.btnPause    = this.isMobile
       ? { x: GW - 184, y: 10, w: 166, h: 84 }
       : { x: GW - 76,  y: 12, w: 56,  h: 56 };
@@ -1155,7 +1166,9 @@ class Game {
   }
 
   _configureCanvas() {
-    const scale = this.lowPowerMode ? MOBILE_RENDER_SCALE_LOW : (this.isMobile ? MOBILE_RENDER_SCALE : 1);
+    const isLateMobileLevel = this.isMobile && this.lm && this.lm.level >= 4;
+    const scale = isLateMobileLevel ? MOBILE_RENDER_SCALE_LATE
+      : (this.lowPowerMode ? MOBILE_RENDER_SCALE_LOW : (this.isMobile ? MOBILE_RENDER_SCALE : 1));
     this.renderScale = scale;
     const w = Math.round(GW * scale);
     const h = Math.round(GH * scale);
@@ -1510,7 +1523,9 @@ class Game {
 
   _startLevel(n) {
     this.lowHpVoicePlayed = false;
-    this.lm.start(n);
+    const mobileCfg = this.isMobile ? MOBILE_LEVEL_CFG[n - 1] : null;
+    this.lm.start(n, mobileCfg);
+    this._configureCanvas();
     this._soundTimeouts.push(setTimeout(() => this._playVoice('lvl'), 1500));
   }
 
@@ -1549,12 +1564,13 @@ class Game {
   _spawn() {
     const loc  = LOCATIONS.haunted_building;
     const roll = Math.random();
+    const bigRoll = this.isMobile && this.lm.level >= 4 ? 0.92 : 0.85;
     let type, pos;
 
     if (roll < 0.50) {
       type = 'windowFace';
       pos  = loc.windowSpots[rndInt(0, loc.windowSpots.length - 1)];
-    } else if (roll < 0.85) {
+    } else if (roll < bigRoll) {
       type = 'tentacle';
       pos  = loc.groundSpots[rndInt(0, loc.groundSpots.length - 1)];
     } else {
