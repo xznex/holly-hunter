@@ -2,6 +2,8 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="description" content="Holy Hunter — бесплатная браузерная игра-шутер. Уничтожай монстров, собирай монеты, прокачивай персонажа. 5 уровней, 3 вида врагов.">
 <meta name="keywords" content="игра, шутер, браузерная игра, holy hunter, canvas game">
@@ -65,6 +67,8 @@ const GH = 1080;
 const TARGET_FPS_MOBILE = 45;
 const MOBILE_RENDER_SCALE = 0.72;
 const MOBILE_RENDER_SCALE_LOW = 0.62;
+const RAIN_COUNT_DESKTOP = 160;
+const RAIN_COUNT_MOBILE = 28;
 
 // ── Количество уровней и время ──────────────────────────────────────────
 const TOTAL_LEVELS  = 5;
@@ -720,6 +724,7 @@ class Weapon {
     this.muzzleFlash = 0; // Интенсивность вспышки 0..1
     this.cooldown    = 0; // Оставшийся кулдаун (мс)
     this.cooldownMs  = 155; // Минимальный интервал между выстрелами
+    this.nextShotAt  = 0;
   }
 
   update(mx, my, dt) {
@@ -735,12 +740,13 @@ class Weapon {
     this.cooldown    = Math.max(0, this.cooldown - dt);
   }
 
-  tryShoot() {
-    if (this.cooldown > 0) return false;
+  tryShoot(now = performance.now()) {
+    if (now < this.nextShotAt) return false;
     this.recoil    = 30;
     this.recoilVel = -9;
     this.muzzleFlash = 1.0;
     this.cooldown  = this.cooldownMs;
+    this.nextShotAt = now + this.cooldownMs;
     return true;
   }
 
@@ -786,7 +792,7 @@ class Weapon {
     ctx.beginPath(); ctx.roundRect(gx+114, gy-15, 13, 16, 2); ctx.fill();
 
     // Muzzle Flash
-    if (this.muzzleFlash > 0.01) {
+    if (this.muzzleFlash > 0.01 && !isMobile) {
       const fx = gx + 127, fy = gy - 7, fs = this.muzzleFlash;
       ctx.shadowColor = '#ffcc00'; ctx.shadowBlur = 40 * fs;
 
@@ -1109,6 +1115,7 @@ class Game {
     this.isIOS       = /iPad|iPhone|iPod/.test(navigator.userAgent);
     this.isStandalone = !!window.navigator.standalone;
     this.lowPowerMode = this.isMobile && ((navigator.deviceMemory && navigator.deviceMemory <= 4) || this.isIOS);
+    this.weatherFxEnabled = !this.lowPowerMode;
     this.btnPause    = this.isMobile
       ? { x: GW - 184, y: 10, w: 166, h: 84 }
       : { x: GW - 76,  y: 12, w: 56,  h: 56 };
@@ -1191,6 +1198,7 @@ class Game {
     };
     c.addEventListener('touchstart', e => {
       e.preventDefault();
+      this.snd.unlockAC();
       const { cx, cy } = toGame(e);
       this.mx = cx; this.my = cy;
       const sliderHit = this._mouseDown(cx, cy);
@@ -1350,7 +1358,8 @@ class Game {
 
   // ── Стрельба ─────────────────────────────────────────────────────────
   _shoot(x, y) {
-    if (!this.weapon.tryShoot()) return;
+    this.weapon.update(x, y, 0);
+    if (!this.weapon.tryShoot(performance.now())) return;
     this.snd.play('shot');
 
     // Частицы вспышки
@@ -1385,6 +1394,7 @@ class Game {
     }
 
     if (!hit) this.combo = 0; // Промах — сброс комбо
+    if (this.isMobile) this._draw();
   }
 
   _onKill(monster, px, py) {
@@ -1618,10 +1628,10 @@ class Game {
     }
 
     // Молния и дождь — только с 3-го уровня
-    if (this.lm.level >= 3) {
+    if (this.lm.level >= 3 && this.weatherFxEnabled) {
       // Дождь: инициализация капель
       if (this.rainDrops.length === 0) {
-        const rainCount = this.lowPowerMode ? 45 : (this.isMobile ? 80 : 220);
+        const rainCount = this.isMobile ? RAIN_COUNT_MOBILE : RAIN_COUNT_DESKTOP;
         for (let i = 0; i < rainCount; i++) {
           this.rainDrops.push({ x: rnd(0, GW), y: rnd(0, GH), spd: rnd(14, 22), len: rnd(12, 26) });
         }
@@ -2004,14 +2014,14 @@ class Game {
       ctx.strokeStyle = '#aaccff';
       ctx.lineWidth = 6;
       ctx.shadowColor = '#88aaff';
-      ctx.shadowBlur = 20;
+      ctx.shadowBlur = this.isMobile ? 0 : 20;
       ctx.beginPath();
       for (const [x1, y1, x2, y2] of this.lightningBolt) { ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); }
       ctx.stroke();
       // Яркое ядро
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
-      ctx.shadowBlur = 8;
+      ctx.shadowBlur = this.isMobile ? 0 : 8;
       ctx.beginPath();
       for (const [x1, y1, x2, y2] of this.lightningBolt) { ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); }
       ctx.stroke();
